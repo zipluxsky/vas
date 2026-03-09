@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ report_name }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: #333333;
+            line-height: 1.6;
+        }
+        .container {
+            margin: 0 auto;
+            padding: 20px;
+            max-width: 600px;
+        }
+        .header {
+            background-color: #f4f4f4;
+            padding: 10px 20px;
+            text-align: center;
+            border-bottom: 2px solid #dddddd;
+        }
+        .content {
+            padding: 20px 0;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eeeeee;
+            font-size: 0.9em;
+            color: #777777;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>{{ report_name }}</h2>
+        </div>
+        <div class="content">
+            <p>您好，</p>
+            <p>{{ message }}</p>
+            <p><strong>報表日期：</strong> {{ date_str }}</p>
+            <br>
+            <p>請查閱附件以獲取詳細資訊。</p>
+        </div>
+        <div class="footer">
+            <p>此為系統自動發送的信件，請勿直接回覆。</p>
+        </div>
+    </div>
+</body>
+</html>

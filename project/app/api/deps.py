@@ -1,0 +1,57 @@
+from typing import Generator
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
+import logging
+
+from app.core.config import settings
+from app.services.db_service import DatabaseService
+from app.services.email_service import EmailService
+from app.integrations.db.mysql import MySQLDatabase
+from app.integrations.db.isql import ISQLDatabase
+from app.integrations.email_client import EmailClient
+
+logger = logging.getLogger(__name__)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/login/access-token")
+
+def get_db_service() -> DatabaseService:
+    """Dependency to provide DatabaseService instance"""
+    mysql_db = MySQLDatabase(settings.db_config.get('mysql', {}))
+    sybase_db = ISQLDatabase(settings.db_config.get('sybase', {}))
+    
+    return DatabaseService(mysql_db, sybase_db)
+
+def get_email_service() -> EmailService:
+    """Dependency to provide EmailService instance"""
+    # Initialize new EmailService using settings directly
+    # Assumes email_config contains 'username', 'password', 'email', and 'server'
+    email_config = settings.email_config
+    return EmailService(
+        username=email_config.get("username", "admin"),
+        password=email_config.get("password", ""),
+        email=email_config.get("email", "admin@vasi.com"),
+        server=email_config.get("server", "mail.vasi.com")
+    )
+
+def verify_token(token: str = Depends(oauth2_scheme)):
+    """Verify JWT token for standard authentication"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(
+            token, 
+            settings.SECRET_KEY, 
+            algorithms=[settings.ALGORITHM]
+        )
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError as e:
+        logger.error(f"JWT validation error: {e}")
+        raise credentials_exception
+        
+    return payload

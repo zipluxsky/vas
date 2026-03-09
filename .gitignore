@@ -1,0 +1,15 @@
+# Environments
+venv/
+
+# Configurations
+configs/
+
+# Data
+data/
+
+# Environment Variables
+.env
+
+# IDE and Editor folders
+.vscode/
+.cursor/
