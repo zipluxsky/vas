@@ -10,15 +10,23 @@ logger = logging.getLogger(__name__)
 
 
 def _read_odbc_ini_section(odbc_ini_path: Path, section: str) -> Dict[str, Any]:
-    """Read a DSN section from odbc.ini. Returns dict with Server (host), Port (int), Database."""
+    """Read a DSN section from odbc.ini. Returns dict with host (Server), port (Port), database (Database)."""
     out: Dict[str, Any] = {}
+    section = (section or "").strip() or "Sample"
     if not odbc_ini_path.exists():
+        logger.debug(f"odbc.ini not found at {odbc_ini_path}")
         return out
     try:
         parser = ConfigParser()
-        parser.read(odbc_ini_path, encoding="utf-8")
+        parser.read(odbc_ini_path, encoding="utf-8-sig")
         if not parser.has_section(section):
-            return out
+            for s in parser.sections():
+                if s.strip() == section:
+                    section = s
+                    break
+            else:
+                logger.warning(f"odbc.ini has no section [{section}]; found: {parser.sections()}")
+                return out
         if parser.has_option(section, "Server"):
             out["host"] = parser.get(section, "Server").strip()
         if parser.has_option(section, "Port"):
@@ -81,7 +89,10 @@ class Settings(BaseSettings):
                 
             # Load datasource configuration (user/password) and odbc.ini (host, port, database)
             datasource_path = self.BASE_DIR.parent / "configs" / "python_config" / "datasource.json"
-            odbc_ini_path = self.BASE_DIR.parent / "configs" / "sybase_config" / "odbc.ini"
+            odbc_candidates = [
+                self.BASE_DIR.parent / "configs" / "sybase_config" / "odbc.ini",
+                self.BASE_DIR / "configs" / "sybase_config" / "odbc.ini",
+            ]
             if datasource_path.exists():
                 with open(datasource_path, 'r') as f:
                     ds_data = json.load(f)
@@ -98,11 +109,21 @@ class Settings(BaseSettings):
                             if 'isql_path' in env_config:
                                 self.db_config['sybase']['isql_path'] = env_config.get('isql_path')
                             # Host, port, database from odbc.ini: datasource "server" value = odbc.ini section tag (e.g. "Sample" -> [Sample])
-                            dsn = env_config.get('server', 'Sample')
-                            odbc = _read_odbc_ini_section(odbc_ini_path, dsn)
-                            for key, value in odbc.items():
+                            dsn = (env_config.get('server') or 'Sample').strip()
+                            odbc = {}
+                            for path in odbc_candidates:
+                                odbc = _read_odbc_ini_section(path, dsn)
+                                if odbc:
+                                    break
+                            for key, value in (odbc or {}).items():
                                 if value is not None:
                                     self.db_config['sybase'][key] = value
+                            sb = self.db_config['sybase']
+                            if not odbc or sb.get('host') is None or sb.get('port') is None or not sb.get('database'):
+                                logger.warning(
+                                    "Sybase host/port/database missing: ensure odbc.ini exists at configs/sybase_config/odbc.ini "
+                                    "with a section matching datasource 'server' (e.g. [Sample]) and Server, Port, Database keys"
+                                )
                             break
             else:
                 logger.warning(f"Datasource config file not found at {datasource_path}, using config.json defaults")

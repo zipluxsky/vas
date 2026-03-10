@@ -5,6 +5,7 @@ default:
 stages:
   - permission_test
   - deploy
+  - pre_production_test
 
 variables:
   DEPLOY_PATH: "${CI_PROJECT_DIR}"
@@ -83,10 +84,22 @@ deploy:
         
         sync_volumes
       fi
+  only:
+    - master
+    - main
 
-      echo "Testing connectivity to each configured database..."
-      cd "${DEPLOY_PATH}"
-      sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python -c 'import sys; from app.core.config import settings; from app.api.deps import get_db_service; db = get_db_service(); sys.exit("MySQL connection failed") if settings.db_config.get("mysql") and not db.mysql.connect() else None; sys.exit("Sybase connection failed") if settings.db_config.get("sybase") and not db.sybase.connect() else None; out = [] if not (settings.db_config.get("mysql") or settings.db_config.get("sybase")) else [s for s in ["MySQL: OK" if settings.db_config.get("mysql") else None, "Sybase: OK" if settings.db_config.get("sybase") else None] if s]; print("No database config found; skip connectivity test" if not out else " ".join(out))'
+pre_production_test:
+  stage: pre_production_test
+  needs:
+    - deploy
+  before_script:
+    - cd "${DEPLOY_PATH}"
+    - test -f docker-compose.yml
+  script:
+    - echo "Testing connectivity to each configured database..."
+    - sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python -c 'import sys; from app.core.config import settings; from app.api.deps import get_db_service; db = get_db_service(); sys.exit("MySQL connection failed") if settings.db_config.get("mysql") and not db.mysql.connect() else None; sys.exit("Sybase connection failed") if settings.db_config.get("sybase") and not db.sybase.connect() else None; out = [] if not (settings.db_config.get("mysql") or settings.db_config.get("sybase")) else [s for s in ["MySQL: OK" if settings.db_config.get("mysql") else None, "Sybase: OK" if settings.db_config.get("sybase") else None] if s]; print("No database config found; skip connectivity test" if not out else " ".join(out))'
+    - echo "Testing email sending (send to self)..."
+    - sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python -c "import asyncio, sys; from app.core.config import settings; from app.api.deps import get_email_service; ec = getattr(settings, 'email_config', None) or {}; run = ec.get('server') or ec.get('email'); (print('No email config; skip email sending test') or sys.exit(0)) if not run else (svc := get_email_service(), setattr(svc, 'smtp_config', {**getattr(svc, 'smtp_config', {}), 'default_recipient': svc.email}), asyncio.run(svc.send(project='pre_production_test', function='email_test', html_body='<p>Pre-production email test (send to self).</p>', env='dev', subject_suffix='[CI]')), print('Email sent to self: OK'))"
   only:
     - master
     - main
