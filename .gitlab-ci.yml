@@ -105,16 +105,28 @@ pre_production_test:
 
       db = get_db_service()
       results = []
+      skipped = []
+
       if settings.db_config.get("mysql"):
           if not db.mysql.connect():
               sys.exit("MySQL connection failed")
           results.append("MySQL: OK")
-      if settings.db_config.get("sybase"):
-          if not db.sybase.connect():
-              sys.exit("Sybase connection failed")
-          results.append("Sybase: OK")
+
+      sb = settings.db_config.get("sybase") or {}
+      if sb:
+          if sb.get("host") is None or sb.get("port") is None or not sb.get("database"):
+              skipped.append("Sybase: odbc.ini not found or no section/server, host/port/database not available — test skipped")
+          else:
+              if not db.sybase.connect():
+                  sys.exit("Sybase connection failed")
+              results.append("Sybase: OK")
+
+      if skipped:
+          for msg in skipped:
+              print(f"Skipped: {msg}")
       if not results:
-          print("No database config found; skip connectivity test")
+          if not skipped:
+              print("No database config found; skip connectivity test")
       else:
           print(" ".join(results))
       DBEOF
