@@ -86,25 +86,7 @@ deploy:
 
       echo "Testing connectivity to each configured database..."
       cd "${DEPLOY_PATH}"
-      sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python -c "
-import sys
-from app.core.config import settings
-from app.api.deps import get_db_service
-db = get_db_service()
-results = []
-if settings.db_config.get('mysql'):
-    if not db.mysql.connect():
-        sys.exit('MySQL connection failed')
-    results.append('MySQL: OK')
-if settings.db_config.get('sybase'):
-    if not db.sybase.connect():
-        sys.exit('Sybase connection failed')
-    results.append('Sybase: OK')
-if not results:
-    print('No database config found; skip connectivity test')
-else:
-    print(' '.join(results))
-"
+      sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python -c 'import sys; from app.core.config import settings; from app.api.deps import get_db_service; db = get_db_service(); sys.exit("MySQL connection failed") if settings.db_config.get("mysql") and not db.mysql.connect() else None; sys.exit("Sybase connection failed") if settings.db_config.get("sybase") and not db.sybase.connect() else None; out = [] if not (settings.db_config.get("mysql") or settings.db_config.get("sybase")) else [s for s in ["MySQL: OK" if settings.db_config.get("mysql") else None, "Sybase: OK" if settings.db_config.get("sybase") else None] if s]; print("No database config found; skip connectivity test" if not out else " ".join(out))'
   only:
     - master
     - main
