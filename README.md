@@ -7,8 +7,8 @@ Document Management and Processing API — FastAPI application with Celery worke
 Base URL (default): `http://localhost:8000`  
 API prefix: **`/api/v1`**
 
-All endpoints under `/api/v1` (except the health check) require **Bearer token** authentication.  
-Include the header: `Authorization: Bearer <your_token>`.
+Endpoints do not require authentication unless you enable `verify_token` on routes.  
+When auth is enabled, use: `Authorization: Bearer <your_token>`.
 
 ### Health check (no auth)
 
@@ -27,19 +27,20 @@ curl http://localhost:8000/health
 
 | Method | URL | Description |
 |--------|-----|-------------|
-| POST | `/api/v1/front-office/upload-document` | Upload a document; saved under `uploads/` and logged. |
+| GET | `/api/v1/front-office/file_confirmation` | Generate File Confirmation report (HTML). |
 
-**Query/body:**
+**Query parameters (all optional):**
 
-- `file` (required): multipart file upload
-- `document_type` (optional): string, default `"general"`
+- `trade_date`: YYYYMMDD (default `19000101` → use today)
+- `cpty`: counterparty filter (default `all`)
+- `by`: delivery mode `email` or `download` (default `email`)
+- `env`: environment `dev`, `uat`, or `prod` (default `prod`)
+- `versioning`: report version (default `1`)
+- `send_file`: whether to send file e.g. by email (default `true`)
 
 Example:
 ```bash
-curl -X POST "http://localhost:8000/api/v1/front-office/upload-document" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -F "file=@/path/to/file.pdf" \
-  -F "document_type=general"
+curl "http://localhost:8000/api/v1/front-office/file_confirmation?trade_date=20250110&cpty=all&by=email"
 ```
 
 ---
@@ -48,40 +49,40 @@ curl -X POST "http://localhost:8000/api/v1/front-office/upload-document" \
 
 | Method | URL | Description |
 |--------|-----|-------------|
-| GET | `/api/v1/communicators/` | List communicators (paginated). |
-| GET | `/api/v1/communicators/{communicator_id}` | Get one communicator by ID. |
-| POST | `/api/v1/communicators/process` | Trigger background processing of communicator files (Celery). |
+| GET | `/api/v1/communicators/ping` | Communicators health check. |
+| POST | `/api/v1/communicators/email_sender` | Send email using matrix configuration (project/function/html_body, optional attachments). |
 
-**List (GET `/api/v1/communicators/`):**
+**POST `/api/v1/communicators/email_sender` body (JSON):**
 
-- `skip` (optional): offset, default `0`
-- `limit` (optional): max count, default `100`
+- `project` (required): string
+- `function` (required): string
+- `html_body` (optional): string, default `""`
+- `env` (optional): string
+- `subject_suffix` (optional): string
+- `attachments` (optional): list of file paths; only paths under `ATTACHMENT_ALLOWED_DIR` are allowed (set in env).
 
 Example:
 ```bash
-curl -X GET "http://localhost:8000/api/v1/communicators/?skip=0&limit=100" \
-  -H "Authorization: Bearer YOUR_TOKEN"
+curl -X POST "http://localhost:8000/api/v1/communicators/email_sender" \
+  -H "Content-Type: application/json" \
+  -d '{"project":"myproject","function":"alerts","html_body":"<p>Hello</p>"}'
 ```
 
-**Trigger processing (POST `/api/v1/communicators/process`):**
-
-No body. Schedules the `process_communicator_files` Celery task.
-
-Example:
+Ping example:
 ```bash
-curl -X POST "http://localhost:8000/api/v1/communicators/process" \
-  -H "Authorization: Bearer YOUR_TOKEN"
+curl http://localhost:8000/api/v1/communicators/ping
 ```
 
 ---
 
-### Authentication
+### Authentication (optional)
 
-Endpoints use **OAuth2 Bearer** (JWT). Obtain a token from your auth provider or the login endpoint (if configured), then:
+If you enable `Depends(verify_token)` on routes, set `SECRET_KEY` in the environment and use a JWT Bearer token:
 
 - **Header:** `Authorization: Bearer <token>`
 
-Interactive docs (Swagger): **`http://localhost:8000/docs`** — use “Authorize” to set the token and try the router URLs from the browser.
+Interactive docs (Swagger): **`http://localhost:8000/docs`**  
+Separate docs: **`/docs/communicators`**, **`/docs/front-office`**
 
 ---
 
@@ -90,9 +91,8 @@ Interactive docs (Swagger): **`http://localhost:8000/docs`** — use “Authoriz
 | Router | Endpoint | Method |
 |--------|----------|--------|
 | Health | `/health` | GET |
-| Front Office | `/api/v1/front-office/upload-document` | POST |
-| Communicators | `/api/v1/communicators/` | GET |
-| Communicators | `/api/v1/communicators/process` | POST |
-| Communicators | `/api/v1/communicators/{communicator_id}` | GET |
+| Front Office | `/api/v1/front-office/file_confirmation` | GET |
+| Communicators | `/api/v1/communicators/ping` | GET |
+| Communicators | `/api/v1/communicators/email_sender` | POST |
 
-For deployment, base URL and auth are environment-dependent; replace `http://localhost:8000` and `YOUR_TOKEN` with your host and token. See `docs/OPERATION_GUIDE.md` for run and deployment details.
+For deployment, set `SECRET_KEY` and optional `ATTACHMENT_ALLOWED_DIR` in the environment. See `docs/OPERATION_GUIDE.md` for run and deployment details.

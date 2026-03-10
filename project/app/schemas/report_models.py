@@ -3,11 +3,6 @@ from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
 
 
-class ReportGenerationRequest(BaseModel):
-    target_date: Optional[str] = None
-    report_type: str = "file_confirmation"
-    formats: List[str] = ["csv", "xlsx"]
-
 class FileConfirmationInput(BaseModel):
     """Input for File Confirmation report (API query params / CLI)."""
     trade_date: str = Field(default="19000101")
@@ -16,6 +11,11 @@ class FileConfirmationInput(BaseModel):
     env: Literal["dev", "uat", "prod"] = "prod"
     versioning: str = "1"
     send_file: bool = True
+
+
+# Alias: same fields as FileConfirmationInput for backward compatibility / alternate entrypoints
+ReportGenerationRequest = FileConfirmationInput
+
 
 class ReportGenerationResponse(BaseModel):
     success: bool

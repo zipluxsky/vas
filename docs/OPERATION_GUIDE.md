@@ -6,8 +6,9 @@
 The architecture consists of:
 - **`vascular-api`**: A FastAPI application serving HTTP requests.
 - **`vascular-worker`**: A Celery worker node responsible for executing background tasks.
+- **`vascular-redis`**: A dedicated Redis instance used only by Vascular as the Celery broker and result backend.
 
-It is designed to interoperate with `AirFlows_P` via a shared Redis instance acting as the Celery message broker.
+Vascular uses its **own Redis** (`vascular-redis` in docker-compose). It interoperates with `AirFlows_P` by exposing HTTP endpoints that enqueue tasks; Airflow triggers those endpoints (Option A). Vascular does not share its broker with Airflow.
 
 ---
 
@@ -33,14 +34,17 @@ The project utilizes Docker Named Volumes to persist state and configuration:
 ---
 
 ## 4. Interaction with AirFlows_P
-`Vascular_P` is connected to the `airflow_shared_net` Docker network, allowing it to communicate seamlessly with AirFlows_P's infrastructure.
+`vascular-api` is attached to the `airflow_shared_net` Docker network so that Airflow can reach the API (e.g. `http://vascular-api:8000`). Vascular's Celery broker is **not** shared with Airflow; it uses `vascular-redis` on the internal `vascular_internal` network.
 
-### Triggering Tasks from Airflow
-`Vascular_P`'s Celery worker listens to a dedicated queue named **`vascular_tasks`**.
-AirFlows_P can trigger Vascular_P functions natively without making HTTP calls, simply by pushing tasks to this shared Celery Queue via the common Redis broker (`redis://redis:6379/0`).
+### Triggering Tasks from Airflow (Option A — recommended)
+Airflow triggers Vascular tasks by **calling Vascular's HTTP API**. The API enqueues the task on Vascular's own Celery broker (`vascular-redis`); the `vascular-worker` consumes from that broker.
 
-**Example: Triggering a Vascular_P task from an Airflow DAG**
-You can use a `CeleryOperator` or a `PythonOperator` in AirFlows_P to dispatch messages to the shared Redis broker, targeting the `vascular_tasks` queue.
+- **Endpoints:**  
+  - `POST /api/v1/communicators/process` — enqueues the communicator files processing task (HTTP 202, returns `task_id`).  
+  - `POST /api/v1/front-office/trigger-upload-document` — enqueues the upload_document task; optional JSON body: `document_type`, `file_path`, `original_filename`.
+- **Example (Airflow XML DAG):** Use a trigger with `url="http://vascular-api:8000/api/v1/communicators/process"` and `method="post"`. See AirFlows_P `dags/dag_definitions/vascular_http_example.xml`.
+
+No shared Redis or `VASCULAR_CELERY_BROKER_URL` is required on the Airflow side when using Option A. The `vascular_tasks` queue is consumed by `vascular-worker`; tasks are submitted via the API, not by Airflow writing to the same broker.
 
 ---
 

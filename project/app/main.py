@@ -33,18 +33,20 @@ app.add_middleware(
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Custom validation error handler to return cleaner error messages"""
+    """Return validation errors only; do not expose request body (sensitive data)."""
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "body": exc.body}
+        content={"detail": exc.errors()}
     )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler"""
+    """Return generic message; log full exception server-side to avoid leaking internals."""
+    import logging
+    logging.getLogger(__name__).exception("Unhandled exception")
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+        content={"detail": "Internal server error"}
     )
 
 # Include routers

@@ -1,9 +1,18 @@
 version: '3.8'
 
 services:
+  vascular-redis:
+    image: redis:7-alpine
+    container_name: vascular-redis
+    networks:
+      - vascular_internal
+    restart: unless-stopped
+
   vascular-api:
     build: .
     container_name: vascular-api
+    depends_on:
+      - vascular-redis
     command: uvicorn project.app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
@@ -11,25 +20,28 @@ services:
       - vascular-configs:/app/configs
       - vascular-data:/app/data
     environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://vascular-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://vascular-redis:6379/0
     networks:
+      - vascular_internal
       - airflow_shared_net
     restart: unless-stopped
 
   vascular-worker:
     build: .
     container_name: vascular-worker
+    depends_on:
+      - vascular-redis
     # Listen to both default 'celery' queue and dedicated 'vascular_tasks' queue
     command: celery -A project.app.core.celery_app worker --loglevel=info -Q celery,vascular_tasks
     volumes:
       - vascular-configs:/app/configs
       - vascular-data:/app/data
     environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://vascular-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://vascular-redis:6379/0
     networks:
-      - airflow_shared_net
+      - vascular_internal
     restart: unless-stopped
 
 volumes:
@@ -37,5 +49,7 @@ volumes:
   vascular-data:
 
 networks:
+  vascular_internal:
+    driver: bridge
   airflow_shared_net:
     external: true

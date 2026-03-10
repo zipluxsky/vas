@@ -16,12 +16,16 @@ class FileConfirmationEngine:
         self.db_service = db_service
         self.config = config
         self.formatter = FileConfirmationFormatter(config.get("formatting", {}))
+        self._run_overrides: Dict[str, Any] = {}
 
-    def generate(self, target_date: datetime) -> Dict[str, Any]:
+    def generate(self, target_date: datetime, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Generate the file confirmation report
+        Generate the file confirmation report.
+        overrides: optional dict (e.g. cpty, env) to override config for this run.
         Returns a dictionary with generation status and output paths
         """
+        overrides = overrides or {}
+        self._run_overrides = overrides
         logger.info(f"Starting file confirmation report generation for {target_date.date()}")
         
         try:
@@ -73,13 +77,11 @@ class FileConfirmationEngine:
             return [{"file_id": 1, "file_name": "test1.txt", "status": "SUCCESS"}]
             
     def _fetch_sybase_data(self, target_date: datetime) -> List[Dict[str, Any]]:
-        """Fetch related business data from Sybase"""
+        """Fetch related business data from Sybase. Uses _run_overrides (e.g. cpty from cmd) when set."""
         from app.services.sql_template_service import sql_templates
         
         try:
-            # Provide the parameter 'cpty' required by the template.
-            # Ensure proper string formatting (e.g. quotes) if it's a string field.
-            cpty_value = self.config.get("cpty", "'DEFAULT_CPTY'")
+            cpty_value = self._run_overrides.get("cpty") or self.config.get("cpty", "'DEFAULT_CPTY'")
             query = sql_templates.get_query("file_confirmation/ExcelExtract", params={"cpty": cpty_value})
             
             return self.db_service.sybase.execute_query(query)

@@ -11,6 +11,16 @@ from app.schemas.report_models import ReportGenerationResponse, FileConfirmation
 logger = logging.getLogger(__name__)
 
 
+def _parse_trade_date(trade_date: str) -> datetime:
+    """Parse trade_date (YYYYMMDD) to datetime. Returns today if invalid or default."""
+    if not trade_date or trade_date == "19000101":
+        return datetime.now()
+    try:
+        return datetime.strptime(trade_date.strip(), "%Y%m%d")
+    except ValueError:
+        return datetime.now()
+
+
 async def run_file_confirmation(
     cmd: FileConfirmationInput,
     host: str = "0.0.0.0",
@@ -25,15 +35,11 @@ async def run_file_confirmation(
         from app.api.deps import get_db_service, get_email_service
         db_service = get_db_service()
         email_service = get_email_service()
-    target_dt = datetime.now()
-    if cmd.target_date:
-        try:
-            target_dt = datetime.strptime(cmd.target_date, "%Y-%m-%d")
-        except ValueError:
-            pass
+    target_dt = _parse_trade_date(cmd.trade_date)
     result = await generate_file_confirmation_report(
         db_service=db_service,
         email_service=email_service,
+        cmd=cmd,
         target_date=target_dt,
     )
     html_parts = [
@@ -53,42 +59,40 @@ async def run_file_confirmation(
 
 
 async def generate_file_confirmation_report(
-    db_service: DatabaseService, 
+    db_service: DatabaseService,
     email_service: EmailService,
-    target_date: datetime = None
+    cmd: FileConfirmationInput,
+    target_date: Optional[datetime] = None,
 ) -> ReportGenerationResponse:
-    """Generate and distribute the file confirmation report"""
-    
+    """Generate and distribute the file confirmation report. Uses cmd.cpty, cmd.by, cmd.send_file for engine/email."""
     if target_date is None:
         target_date = datetime.now()
-        
-    logger.info(f"Initiating file confirmation report for {target_date.date()}")
+
+    logger.info(f"Initiating file confirmation report for {target_date.date()} (cpty={cmd.cpty}, by={cmd.by}, env={cmd.env})")
 
     try:
-        # Load configuration
+        # Load configuration and override with cmd fields
         config = report_config_loader.load_report_config("file_confirmation")
-        
-        # Initialize engine
+        overrides = {"cpty": cmd.cpty, "env": cmd.env}
+
+        # Initialize engine and generate with overrides
         engine = FileConfirmationEngine(db_service, config)
-        
-        # Generate report
-        result = engine.generate(target_date)
-        
+        result = engine.generate(target_date, overrides=overrides)
+
         if not result.get("success"):
             return ReportGenerationResponse(
                 success=False,
                 message=f"Generation failed: {result.get('error')}"
             )
-            
-        # Send via email
+
+        # Send via email only when send_file=True and by=email
         output_paths = result.get("output_paths", [])
-        if output_paths:
+        if output_paths and cmd.send_file and cmd.by == "email":
             email_sent = email_service.send_report(
-                "File Confirmation", 
-                output_paths, 
+                "File Confirmation",
+                output_paths,
                 target_date
             )
-            
             if not email_sent:
                 logger.warning("Report generated but email sending failed")
                 

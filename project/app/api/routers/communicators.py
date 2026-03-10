@@ -6,7 +6,7 @@ from app.schemas.communicators import MatrixSendRequest
 
 # CLI registry + runner
 from app.core.cli import expose_cli
-from app.usecases.communicators import run_email_sender
+from app.usecases.communicators import run_email_sender, process_communicator_files
 
 # logging
 from app.core.logging import LogManager
@@ -57,6 +57,21 @@ async def email_sender(
 @router.get("/ping", summary="Communicators health")
 async def ping():
     return {"status": "ok"}
+
+
+@router.post(
+    "/process",
+    summary="Trigger communicator files processing (enqueues Celery task)",
+    response_model=dict,
+    status_code=202,
+)
+async def process():
+    """
+    Enqueues process_communicator_files on Vascular's Celery worker.
+    Used by Airflow (Option A: HTTP trigger). Returns task_id for polling.
+    """
+    result = process_communicator_files.delay()
+    return {"ok": True, "task_id": result.id}
 
 
 # --- AUTO-REGISTER CLI on module import ---

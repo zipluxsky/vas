@@ -11,7 +11,6 @@ celery_app = Celery(
     backend=result_backend,
     include=[
         "app.usecases.communicators",
-        "app.usecases.reports",
         "app.usecases.front_office_tasks",
     ],
 )
