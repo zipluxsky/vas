@@ -1,11 +1,37 @@
 import os
 import json
 import logging
+from configparser import ConfigParser
 from pydantic_settings import BaseSettings
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _read_odbc_ini_section(odbc_ini_path: Path, section: str) -> Dict[str, Any]:
+    """Read a DSN section from odbc.ini. Returns dict with Server (host), Port (int), Database."""
+    out: Dict[str, Any] = {}
+    if not odbc_ini_path.exists():
+        return out
+    try:
+        parser = ConfigParser()
+        parser.read(odbc_ini_path, encoding="utf-8")
+        if not parser.has_section(section):
+            return out
+        if parser.has_option(section, "Server"):
+            out["host"] = parser.get(section, "Server").strip()
+        if parser.has_option(section, "Port"):
+            try:
+                out["port"] = parser.getint(section, "Port")
+            except ValueError:
+                out["port"] = int(parser.get(section, "Port").strip())
+        if parser.has_option(section, "Database"):
+            out["database"] = parser.get(section, "Database").strip()
+        return out
+    except Exception as e:
+        logger.warning(f"Could not read odbc.ini section [{section}]: {e}")
+        return out
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Vascular Document Processing"
@@ -53,33 +79,31 @@ class Settings(BaseSettings):
             else:
                 logger.warning(f"Config file not found at {config_path}, using defaults")
                 
-            # Load datasource configuration (e.g. for sybase)
+            # Load datasource configuration (user/password) and odbc.ini (host, port, database)
             datasource_path = self.BASE_DIR.parent / "configs" / "python_config" / "datasource.json"
+            odbc_ini_path = self.BASE_DIR.parent / "configs" / "sybase_config" / "odbc.ini"
             if datasource_path.exists():
                 with open(datasource_path, 'r') as f:
                     ds_data = json.load(f)
                     db_root = ds_data.get("database", {})
                     for db_name, envs in db_root.items():
-                        # Use self.ENVIRONMENT or fallback to dev
                         env = self.ENVIRONMENT if self.ENVIRONMENT in envs else "dev"
                         if env in envs:
                             env_config = envs[env]
                             if 'sybase' not in self.db_config:
                                 self.db_config['sybase'] = {}
-                            
-                            self.db_config['sybase']['host'] = env_config.get('server')
+                            # User and password from datasource.json only
                             self.db_config['sybase']['user'] = env_config.get('user')
                             self.db_config['sybase']['password'] = env_config.get('password')
-                            self.db_config['sybase']['database'] = db_name
-                            
-                            # ISQL Path Override
                             if 'isql_path' in env_config:
                                 self.db_config['sybase']['isql_path'] = env_config.get('isql_path')
-                                
-                            # Default port if not present
-                            if 'port' not in self.db_config['sybase']:
-                                self.db_config['sybase']['port'] = env_config.get('port')
-                            break # Assume the first database definition applies to Sybase
+                            # Host, port, database from odbc.ini: datasource "server" value = odbc.ini section tag (e.g. "Sample" -> [Sample])
+                            dsn = env_config.get('server', 'Sample')
+                            odbc = _read_odbc_ini_section(odbc_ini_path, dsn)
+                            for key, value in odbc.items():
+                                if value is not None:
+                                    self.db_config['sybase'][key] = value
+                            break
             else:
                 logger.warning(f"Datasource config file not found at {datasource_path}, using config.json defaults")
                     
