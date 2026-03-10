@@ -1,70 +1,97 @@
-# project/app/core/config.py
-from pathlib import Path
-from typing import Any, Dict
+import os
 import json
+import logging
+from pydantic_settings import BaseSettings
+from typing import List, Dict, Any, Union
+from pathlib import Path
 
-from pydantic_settings import BaseSettings, SettingsConfigDict  # v2 style
-from pydantic import Field
-
-
-def _resolve_default_email_config() -> Path:
-    """Resolve configs/email.json robustly regardless of where the process is started.
-    Current file: project/app/core/config.py
-    Repo root: .../vascular_api
-    We expect: .../vascular_api/configs/email.json
-
-    :return: Path to configs/email.json
-    """
-    here = Path(__file__).resolve()
-    # parents:
-    # 0 = .../project/app/core
-    # 1 = .../project/app
-    # 2 = .../project
-    # 3 = .../vascular_api (repo root)
-    repo_root = here.parents[3]
-    candidate = repo_root / "configs" / "email.json"
-    return candidate
-
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
-    SMTP_HOST: str = "mailhost"
-    SMTP_PORT: int = 25
-    SMTP_STARTTLS: bool = True
-    SMTP_USERNAME: str | None = None
-    SMTP_PASSWORD: str | None = None
-    EMAIL_FROM: str = ""
-    JTDS_JAR_PATH: Path = Field(default_factory=lambda: Path("drivers/jtds-1.2.jar"))
-    ISQL_BIN: str = "isql"
-
-    # Use a robust default, but still overrideable by env or .env
-    EMAIL_CONFIG_PATH: Path = Field(default_factory=_resolve_default_email_config)
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        extra="ignore",
-    )
-
-    # Compatibility: used by main, deps, logging, reports, etc.
-    BASE_DIR: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[2])
     PROJECT_NAME: str = "Vascular Document Processing"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
-    LOG_LEVEL: str = "INFO"
-    BACKEND_CORS_ORIGINS: list[str] = ["*"]
-    SECRET_KEY: str = "your-super-secret-key-that-should-be-changed"
+    
+    # Environment
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    
+    # CORS
+    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    
+    # JWT Settings — SECRET_KEY must be set via environment variable (no hardcoded default)
+    SECRET_KEY: str = ""  # Set SECRET_KEY in environment; empty causes JWT auth to fail
     ALGORITHM: str = "HS256"
-    db_config: Dict[str, Any] = Field(default_factory=dict)
-    email_config: Dict[str, Any] = Field(default_factory=dict)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # Attachments: only paths under this directory are allowed (prevents path traversal).
+    # Set via ATTACHMENT_ALLOWED_DIR env or leave empty to reject path-based attachments from API.
+    ATTACHMENT_ALLOWED_DIR: str = ""
 
-def load_email_matrix(path: Path) -> Dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Email matrix not found at: {path}\n"
-            "Tip: set EMAIL_CONFIG_PATH env var or fix default resolver,"
-        )
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    # Base paths
+    BASE_DIR: Path = Path(__file__).parent.parent.parent.absolute()
+    
+    # These will be populated from config files
+    db_config: Dict[str, Any] = {}
+    email_config: Dict[str, Any] = {}
+    
+    class Config:
+        case_sensitive = True
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.load_configs()
+        
+    def load_configs(self):
+        """Load external configuration files"""
+        try:
+            config_path = self.BASE_DIR / "config.json"
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    data = json.load(f)
+                    self.db_config = data.get("db", {})
+            else:
+                logger.warning(f"Config file not found at {config_path}, using defaults")
+                
+            # Load datasource configuration (e.g. for sybase)
+            datasource_path = self.BASE_DIR.parent / "configs" / "python_config" / "datasource.json"
+            if datasource_path.exists():
+                with open(datasource_path, 'r') as f:
+                    ds_data = json.load(f)
+                    db_root = ds_data.get("database", {})
+                    for db_name, envs in db_root.items():
+                        # Use self.ENVIRONMENT or fallback to dev
+                        env = self.ENVIRONMENT if self.ENVIRONMENT in envs else "dev"
+                        if env in envs:
+                            env_config = envs[env]
+                            if 'sybase' not in self.db_config:
+                                self.db_config['sybase'] = {}
+                            
+                            self.db_config['sybase']['host'] = env_config.get('server')
+                            self.db_config['sybase']['user'] = env_config.get('user')
+                            self.db_config['sybase']['password'] = env_config.get('password')
+                            self.db_config['sybase']['database'] = db_name
+                            
+                            # ISQL Path Override
+                            if 'isql_path' in env_config:
+                                self.db_config['sybase']['isql_path'] = env_config.get('isql_path')
+                                
+                            # Default port if not present
+                            if 'port' not in self.db_config['sybase']:
+                                self.db_config['sybase']['port'] = env_config.get('port')
+                            break # Assume the first database definition applies to Sybase
+            else:
+                logger.warning(f"Datasource config file not found at {datasource_path}, using config.json defaults")
+                    
+            email_config_path = self.BASE_DIR.parent / "configs" / "python_config" / "email_config.json"
+            if email_config_path.exists():
+                with open(email_config_path, 'r') as f:
+                    self.email_config = json.load(f)
+            else:
+                logger.warning(f"Email config file not found at {email_config_path}, using defaults")
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing JSON configuration: {e}")
+        except Exception as e:
+            logger.error(f"Error loading configurations: {e}")
 
 settings = Settings()
