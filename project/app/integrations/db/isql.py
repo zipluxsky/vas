@@ -26,7 +26,12 @@ class ISQLDatabase(BaseDatabase):
         self.isql_path = config.get("isql_path", "isql")
 
     def connect(self) -> bool:
-        """Test the connection by running a simple query"""
+        """Test the connection by running a simple query. Returns False if config is incomplete."""
+        if not self.host or self.port is None or not self.user or not self.database:
+            logger.warning(
+                "Sybase/ISQL config incomplete: host, port, user and database are required; skipping connection"
+            )
+            return False
         try:
             result = self._run_isql("SELECT 1")
             return "1" in result or bool(result)

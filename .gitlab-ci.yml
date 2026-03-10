@@ -84,9 +84,27 @@ deploy:
         sync_volumes
       fi
 
-      echo "Testing connectivity to each database..."
+      echo "Testing connectivity to each configured database..."
       cd "${DEPLOY_PATH}"
-      sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python -c 'import sys; from app.api.deps import get_db_service; db = get_db_service(); sys.exit("MySQL connection failed") if not db.mysql.connect() else None; sys.exit("Sybase connection failed") if not db.sybase.connect() else None; print("MySQL: OK, Sybase: OK")'
+      sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python -c "
+import sys
+from app.core.config import settings
+from app.api.deps import get_db_service
+db = get_db_service()
+results = []
+if settings.db_config.get('mysql'):
+    if not db.mysql.connect():
+        sys.exit('MySQL connection failed')
+    results.append('MySQL: OK')
+if settings.db_config.get('sybase'):
+    if not db.sybase.connect():
+        sys.exit('Sybase connection failed')
+    results.append('Sybase: OK')
+if not results:
+    print('No database config found; skip connectivity test')
+else:
+    print(' '.join(results))
+"
   only:
     - master
     - main

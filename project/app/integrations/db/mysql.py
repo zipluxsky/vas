@@ -17,14 +17,18 @@ class MySQLDatabase(BaseDatabase):
     def connect(self) -> bool:
         if self.engine is not None:
             return True
-            
+
+        host = self.config.get("host")
+        port = self.config.get("port")
+        database = self.config.get("database")
+        if not host or port is None or not database:
+            logger.warning("MySQL config incomplete: host, port and database are required; skipping connection")
+            return False
+
         try:
             user = self.config.get("user", "")
             password = self.config.get("password", "")
-            host = self.config.get("host", "localhost")
-            port = self.config.get("port", 3306)
-            database = self.config.get("database", "")
-            
+
             # Using mysql+pymysql as the standard driver
             connection_url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
             
