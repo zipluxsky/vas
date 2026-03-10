@@ -9,7 +9,11 @@ celery_app = Celery(
     "worker",
     broker=redis_url,
     backend=result_backend,
-    include=["app.usecases.communicators", "app.usecases.reports"]
+    include=[
+        "app.usecases.communicators",
+        "app.usecases.reports",
+        "app.usecases.front_office_tasks",
+    ],
 )
 
 celery_app.conf.update(

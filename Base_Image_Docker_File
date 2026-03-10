@@ -1,0 +1,172 @@
+# Base image for vascular: Python 3.11 + MS ODBC 18 + Sybase 16 SDK
+# Reconstructed from base_image1-4.JPEG
+
+FROM python:3.11-slim
+
+# Set environment variables to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Add Debian Bullseye repository for libssl1.1 and libaio1
+RUN echo "deb http://deb.debian.org/debian bullseye main" > /etc/apt/sources.list.d/bullseye.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        cron \
+        curl \
+        gnupg \
+        libaio1 \
+        libgtk2.0-0 \
+        locales \
+        unzip \
+        autoconf \
+        automake \
+        libtool \
+        rpm \
+        perl \
+        cpio \
+        libstdc++6 \
+        libc6 \
+        libgcc1 \
+        libcomerr2 \
+        netcat-openbsd \
+        bash \
+        libssl1.1 \
+        libkrb5-3 \
+        vim && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm /etc/apt/sources.list.d/bullseye.list
+
+# Install Microsoft ODBC Driver for SQL Server and unixODBC
+RUN curl -o /tmp/microsoft.asc https://packages.microsoft.com/keys/microsoft.asc && \
+    gpg --dearmor /tmp/microsoft.asc > /etc/apt/trusted.gpg.d/microsoft.gpg && \
+    rm /tmp/microsoft.asc && \
+    curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && \
+    ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
+        msodbcsql18 \
+        unixodbc \
+        unixodbc-dev && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Verify msodbcsql18 driver file and update odbcinst.ini dynamically
+RUN DRIVER_PATH=$(find /opt/microsoft -name 'libmsodbcsql-*.so' 2>/dev/null | head -1) && \
+    echo "Driver path: $DRIVER_PATH" && \
+    printf '[ODBC Driver 18 for SQL Server]\nDescription=Microsoft ODBC Driver 18 for SQL Server\nDriver=%s\nThreading=1\n\n' "$DRIVER_PATH" > /etc/odbcinst.ini && \
+    echo '/opt/microsoft/msodbcsql18/lib64' > /etc/ld.so.conf.d/msodbcsql18.conf && \
+    ldconfig
+
+# Verify /bin/sh exists
+RUN test -f /bin/sh && echo "bin/sh exists" || (echo "bin/sh missing"; exit 1)
+
+# Set up Locale (required by Sybase)
+RUN echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen && locale-gen en_US.UTF-8
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# Install unixODBC 2.3.12 from source
+COPY installer/unixODBC-2.3.12.tar.gz /tmp/unixODBC-2.3.12.tar.gz
+RUN ls -la /tmp/unixODBC-2.3.12.tar.gz && \
+    cd /tmp && \
+    tar -xzf unixODBC-2.3.12.tar.gz && \
+    cd unixODBC-2.3.12 && \
+    ./configure --prefix=/usr/local && \
+    make && make install && \
+    rm -rf /tmp/unixODBC-2.3.12*
+
+# Update Ldconfig for unixODBC Libraries
+RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/unixodbc.conf && \
+    ldconfig
+
+# Verify unixODBC isql version
+RUN /usr/local/bin/isql --version
+
+# Install Sybase SDK
+COPY installer/sybasesdk16-16.0-6.x86_64.rpm /tmp/sybasesdk16-16.0-6.x86_64.rpm
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libaio1 \
+        libgcc1 \
+        perl \
+        bash \
+        libncurses6 \
+        libtinfo6 \
+        libc6-i386 \
+        lib32stdc++6 && \
+    mkdir -p /tmp/rpm_extract && \
+    cd /tmp/rpm_extract && \
+    rpm2cpio /tmp/sybasesdk16-16.0-6.x86_64.rpm | cpio -idmv && \
+    mkdir -p /opt/sybase16 && \
+    cp -r opt/sybase16/* /opt/sybase16/ && \
+    cd /tmp && \
+    rm -rf /tmp/rpm_extract /tmp/sybasesdk16-16.0-6.x86_64.rpm && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Debug Sybase SDK installation
+RUN find /opt/sybase16 -type f -executable -exec file {} \; && \
+    ls -1 /opt/sybase16/OCS-16_0/bin/ || (echo "Sybase bin directory missing or empty"; exit 1)
+
+# Verify Sybase SDK installation - Libraries
+RUN ls -1 /opt/sybase16/OCS-16_0/lib/ /opt/sybase16/DataAccess64/ODBC/lib || (echo "Sybase SDK installation failed: libraries missing"; exit 1)
+
+# Verify Sybase SDK installation - isql binary
+RUN if [ -f /opt/sybase16/OCS-16_0/bin/isql ]; then \
+        ls -1 /opt/sybase16/OCS-16_0/bin/isql && \
+        file /opt/sybase16/OCS-16_0/bin/isql && \
+        chmod +x /opt/sybase16/OCS-16_0/bin/isql && \
+        /opt/sybase16/OCS-16_0/bin/isql -v || (echo "Sybase isql failed to run"; exit 1); \
+    else \
+        echo "isql not found in /opt/sybase16/OCS-16_0/bin/, searching elsewhere" && \
+        ISQL_PATH=$(find /opt/sybase16 -name isql -type f) && \
+        if [ -n "$ISQL_PATH" ]; then \
+            echo "Found isql at $ISQL_PATH" && \
+            file "$ISQL_PATH" && \
+            chmod +x "$ISQL_PATH" && \
+            "$ISQL_PATH" -v || (echo "Sybase isql at $ISQL_PATH failed to run"; exit 1); \
+        else \
+            echo "Sybase isql binary not found anywhere"; exit 1; \
+        fi; \
+    fi
+
+# Set Sybase environment variables
+ENV SAP_JRE7_32=/opt/sybase16/shared/jre7_32
+ENV SAP_JRE7=/opt/sybase16/shared/jre7
+ENV SAP_JRE7_64=/opt/sybase16/shared/jre7_64
+ENV SYBASE_OCS=OCS-16_0
+ENV INCLUDE="/opt/sybase16/OCS-16_0/include:${INCLUDE}"
+ENV LIB="/opt/sybase16/OCS-16_0/lib:${LIB}"
+ENV PATH="/opt/sybase16/OCS-16_0/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/sybase16/OCS-16_0/lib:/opt/sybase16/OCS-16_0/lib3p64:/opt/sybase16/OCS-16_0/lib3p:/opt/sybase16/DataAccess/ODBC/lib:/opt/sybase16/DataAccess64/ODBC/lib:${LD_LIBRARY_PATH}"
+ENV SYBASE=/opt/sybase16
+ENV SYBROOT=/opt/sybase16
+ENV SYBASE_LOGDIR=/tmp
+ENV SYBASE_LOG=1
+ENV ODBCINI=/etc/odbc.ini
+ENV ODBCSYSINI=/etc
+
+# Update Ldconfig for Sybase Libraries
+RUN echo '/opt/sybase16/OCS-16_0/lib' >> /etc/ld.so.conf.d/sybase.conf && \
+    echo '/opt/sybase16/OCS-16_0/lib3p64' >> /etc/ld.so.conf.d/sybase.conf && \
+    echo '/opt/sybase16/OCS-16_0/lib3p' >> /etc/ld.so.conf.d/sybase.conf && \
+    echo '/opt/sybase16/DataAccess/ODBC/lib' >> /etc/ld.so.conf.d/sybase.conf && \
+    echo '/opt/sybase16/DataAccess64/ODBC/lib' >> /etc/ld.so.conf.d/sybase.conf && \
+    ldconfig
+
+# Copy Sybase configuration files
+COPY configs/sybase_config/interfaces /opt/sybase16/interfaces
+RUN sed -i 's/\r$//' /opt/sybase16/interfaces
+
+COPY configs/sybase_config/odbc.ini /etc/odbc.ini
+RUN sed -i 's/\r$//' /etc/odbc.ini
+
+# Set permissions for Sybase and config files
+RUN chmod -R 755 /opt/sybase16 && \
+    chmod 644 /etc/odbc.ini /etc/odbcinst.ini
+
+# Verify Sybase environment variables
+RUN env | grep -E 'SYBASE|SYBROOT' || (echo "Sybase environment variables missing"; exit 1)

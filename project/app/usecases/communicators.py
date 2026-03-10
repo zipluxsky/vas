@@ -78,3 +78,13 @@ def process_communicator_files():
             "files_processed": 0
         })
         return f"Error: {e}"
+
+
+@celery_app.task(name="trigger_processing")
+def trigger_processing(**kwargs) -> str:
+    """
+    Celery task with the same name as the router endpoint.
+    Runs the same logic as process_communicator_files so Option B (Airflow XML)
+    can trigger by task name "trigger_processing" without changing the API.
+    """
+    return process_communicator_files.apply()

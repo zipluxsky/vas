@@ -44,17 +44,37 @@ You can use a `CeleryOperator` or a `PythonOperator` in AirFlows_P to dispatch m
 
 ---
 
-## 5. Local Development
+## 5. Base Image and Sybase Config
+The application image is built **on top of the `vascular_base` image**, which provides Python 3.11, Microsoft ODBC 18, and Sybase 16 SDK. You must build and tag the base image before building the Vascular_P app image.
+
+### Building the base image
+From the root of the `Vascular_P` repository (with `installer/` and `configs/sybase_config/` in place):
+
+```bash
+docker build -f Base_Image_Docker_File -t vascular_base .
+```
+
+The base image bakes in `configs/sybase_config/interfaces` and `configs/sybase_config/odbc.ini` at build time. The app image uses an **entrypoint** that, at container start, copies any **non-empty** files from the mounted `configs/sybase_config/` (e.g. from the `vascular-configs` volume) over the built-in paths. So you can deploy real Sybase/ODBC config later by updating the config in the volume (or in the repo and re-syncing) **without rebuilding the image**.
+
+- **Placeholder config**: Repo `configs/sybase_config/` currently contains placeholder files. The base image build and the app both work with these.
+- **Real config**: When you have real `interfaces`, `odbc.ini`, and optionally `odbcinst.ini`, put them in `configs/sybase_config/` (or sync them into the `vascular-configs` volume). Ensure the `isql_path` in `configs/python_config/datasource.json` points to the Sybase `isql` binary in the container (e.g. `/opt/sybase16/OCS-16_0/bin/isql`) if you use the ISQL integration.
+
+**CI/CD**: The GitLab pipeline runs `docker compose build` for the app image. The runner must have the `vascular_base` image available (build it manually or add a pipeline job that runs `docker build -f Base_Image_Docker_File -t vascular_base .` before deploy, if the `installer/` assets are available in the build context).
+
+---
+
+## 6. Local Development
 To run `Vascular_P` locally on your machine:
 
-1. Ensure Docker and Docker Compose are installed.
-2. (Optional) If you are running it alongside Airflow locally, make sure the `airflow_shared_net` network exists:
+1. Build the base image and tag it as `vascular_base` (see section 5).
+2. Ensure Docker and Docker Compose are installed.
+3. (Optional) If you are running it alongside Airflow locally, make sure the `airflow_shared_net` network exists:
    ```bash
    docker network create airflow_shared_net
    ```
-3. Run the following command in the root `Vascular_P` directory:
+4. Run the following command in the root `Vascular_P` directory:
    ```bash
    docker compose up -d --build
    ```
-4. The API will be available at `http://localhost:8000`. 
-5. You can view the API documentation (Swagger UI) at `http://localhost:8000/docs`.
+5. The API will be available at `http://localhost:8000`. 
+6. You can view the API documentation (Swagger UI) at `http://localhost:8000/docs`.

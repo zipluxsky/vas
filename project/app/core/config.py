@@ -50,7 +50,7 @@ class Settings(BaseSettings):
                 logger.warning(f"Config file not found at {config_path}, using defaults")
                 
             # Load datasource configuration (e.g. for sybase)
-            datasource_path = self.BASE_DIR.parent / "configs" / "datasource.json"
+            datasource_path = self.BASE_DIR.parent / "configs" / "python_config" / "datasource.json"
             if datasource_path.exists():
                 with open(datasource_path, 'r') as f:
                     ds_data = json.load(f)
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
             else:
                 logger.warning(f"Datasource config file not found at {datasource_path}, using config.json defaults")
                     
-            email_config_path = self.BASE_DIR / "email.json"
+            email_config_path = self.BASE_DIR.parent / "configs" / "python_config" / "email.json"
             if email_config_path.exists():
                 with open(email_config_path, 'r') as f:
                     self.email_config = json.load(f)

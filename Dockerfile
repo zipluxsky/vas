@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+# Vascular_P app image: uses vascular_base (build with Base_Image_Docker_File first).
+# Build base: docker build -f Base_Image_Docker_File -t vascular_base .
+FROM vascular_base
 
 WORKDIR /app
 
@@ -6,11 +8,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy application and entrypoint
 COPY project/ ./project/
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Add project directory to PYTHONPATH
 ENV PYTHONPATH=/app/project
 
-# Default command for the API (can be overridden by docker-compose)
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "project.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

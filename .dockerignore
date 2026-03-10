@@ -1,0 +1,39 @@
+# Virtual environment (not needed in image)
+venv/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Version control
+.git/
+.gitignore
+
+# IDE and editor
+.vscode/
+.cursor/
+
+# Local env (secrets stay off image)
+.env
+.env.*
+
+# Docs (not needed at runtime in container)
+docs/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -13,14 +13,16 @@ class ReportConfigLoader:
     
     def __init__(self, config_dir: Optional[Path] = None):
         if config_dir is None:
-            self.config_dir = settings.BASE_DIR / "configs" / "reports"
+            self.config_dir = settings.BASE_DIR.parent / "configs" / "python_config"
         else:
             self.config_dir = config_dir
-            
+
     def load_report_config(self, report_name: str) -> Dict[str, Any]:
-        """Load configuration for a specific report"""
+        """Load configuration for a specific report. Tries {report_name}.json then {report_name}/config.json."""
         config_path = self.config_dir / f"{report_name}.json"
-        
+        if not config_path.exists():
+            config_path = self.config_dir / report_name / "config.json"
+
         if not os.path.exists(config_path):
             logger.warning(f"Config file not found: {config_path}")
             return {}
