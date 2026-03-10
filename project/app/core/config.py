@@ -19,11 +19,15 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["*"]
     
-    # JWT Settings
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-that-should-be-changed")
+    # JWT Settings — SECRET_KEY must be set via environment variable (no hardcoded default)
+    SECRET_KEY: str = ""  # Set SECRET_KEY in environment; empty causes JWT auth to fail
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    
+
+    # Attachments: only paths under this directory are allowed (prevents path traversal).
+    # Set via ATTACHMENT_ALLOWED_DIR env or leave empty to reject path-based attachments from API.
+    ATTACHMENT_ALLOWED_DIR: str = ""
+
     # Base paths
     BASE_DIR: Path = Path(__file__).parent.parent.parent.absolute()
     

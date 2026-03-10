@@ -35,7 +35,12 @@ def get_email_service() -> EmailService:
     )
 
 def verify_token(token: str = Depends(oauth2_scheme)):
-    """Verify JWT token for standard authentication"""
+    """Verify JWT token for standard authentication. Requires SECRET_KEY to be set in environment."""
+    if not (getattr(settings, "SECRET_KEY", None) or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SECRET_KEY is not configured; set SECRET_KEY environment variable",
+        )
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",

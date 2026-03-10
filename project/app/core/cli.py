@@ -1,113 +1,222 @@
-import click
-import logging
+# project/app/core/cli.py
+from __future__ import annotations
+
 import asyncio
-from datetime import datetime
+import inspect
+import json
+import threading
+import types
+import typing as t
+from pathlib import Path
 
-from app.core.config import settings
-from app.services.db_service import DatabaseService
-from app.services.email_service import EmailService
-from app.integrations.db.mysql import MySQLDatabase
-from app.integrations.db.isql import ISQLDatabase
-from app.integrations.email_client import EmailClient
-from app.usecases.reports import generate_file_confirmation_report
+import click
+from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+cli = click.Group(help="Project command-line interface")
+_groups: dict[str, click.Group] = {}
 
-def get_services():
-    """Helper to initialize services for CLI commands"""
-    mysql_db = MySQLDatabase(settings.db_config.get('mysql', {}))
-    sybase_db = ISQLDatabase(settings.db_config.get('sybase', {}))
-    db_service = DatabaseService(mysql_db, sybase_db)
-    
-    email_config = settings.email_config
-    email_service = EmailService(
-        username=email_config.get("username", "admin"),
-        password=email_config.get("password", ""),
-        email=email_config.get("email", "admin@vasi.com"),
-        server=email_config.get("server", "mail.vasi.com")
-    )
-    
-    return db_service, email_service
 
-@click.group()
-def commands():
-    """Core commands for VASCULAR"""
-    pass
+def _get_group(name: str | None) -> click.Group:
+    if not name:
+        return cli
+    if name not in _groups:
+        _groups[name] = click.Group(name=name, help=f"{name} commands")
+        cli.add_command(_groups[name], name)
+    return _groups[name]
 
-@commands.command('test-db')
-def test_db():
-    """Test database connections"""
-    logger.info("Testing database connections...")
+
+# --------- FIX 1: Type unwrapping (Optional[list[str]] etc.) ----------
+NoneType = type(None)
+
+
+def _unwrap_optional(tp: t.Any) -> t.Any:
+    """If tp is Optional[T] / Union[T, None], return T. else tp."""
+    origin = t.get_origin(tp)
+    args = t.get_args(tp)
+    # Handle both typing.Union and PEP604 unions (X | None)
+    union_origins = {t.Union}
+    if hasattr(types, "UnionType"):
+        union_origins.add(types.UnionType)  # Python 3.10+
+
+    if origin in union_origins and args:
+        non_none = [a for a in args if a is not NoneType]
+        if len(non_none) == 1:
+            return non_none[0]
+
+    return tp
+
+
+def _is_list_type(tp: t.Any) -> bool:
+    tp = _unwrap_optional(tp)
+    origin = t.get_origin(tp)
+    return origin in (list, t.List)
+
+
+def _pytype_to_click(tp: t.Any) -> t.Any:
+    tp = _unwrap_optional(tp)
+    origin = t.get_origin(tp)
+
+    if origin in (list, t.List):
+        return str  # list items treated as strings
+
+    if tp in (str, int, float, bool):
+        return tp
+
+    return str
+
+
+def _flatten_comma_multiple(values: tuple[str, ...] | None) -> list[str] | None:
+    if not values:
+        return None
+    out: list[str] = []
+    for v in values:
+        out.extend([x.strip() for x in v.split(",") if x.strip()])
+    return out or None
+
+
+#
+# FIX 2: Run coroutine even if event loop is already running
+#
+def _run_coroutine_sync(coro: t.Awaitable[t.Any]) -> t.Any:
+    """
+    Run coroutine from sync code.
+    - If no running loop: asyncio.run(coro)
+    - If already in a running loop (pytest-asyncio/Jupyter): run in a new thread.
+    """
     try:
-        db_service, _ = get_services()
-        
-        # This would actually attempt connection in a real implementation
-        mysql_status = db_service.mysql.connect()
-        sybase_status = db_service.sybase.connect()
-        
-        if mysql_status and sybase_status:
-            click.secho("Successfully connected to all databases!", fg="green")
-        else:
-            if not mysql_status:
-                click.secho("Failed to connect to MySQL database", fg="red")
-            if not sybase_status:
-                click.secho("Failed to connect to Sybase database", fg="red")
-            
-    except Exception as e:
-        logger.error(f"Database connection error: {e}")
-        click.secho(f"Error testing database connections: {e}", fg="red")
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
 
-@commands.command('process-reports')
-@click.option('--date', help='Date to process in YYYY-MM-DD format (defaults to today)')
-def process_reports(date):
-    """Process file confirmation reports"""
-    process_date = datetime.now()
-    if date:
+    result_box: dict[str, t.Any] = {}
+    error_box: dict[str, BaseException] = {}
+
+    def _thread_target():
         try:
-            process_date = datetime.strptime(date, "%Y-%m-%d")
-        except ValueError:
-            click.secho("Invalid date format. Use YYYY-MM-DD", fg="red")
-            return
-            
-    click.echo(f"Processing reports for date: {process_date.strftime('%Y-%m-%d')}")
+            result_box["result"] = asyncio.run(coro)
+        except BaseException as e:
+            error_box["error"] = e
 
+    th = threading.Thread(target=_thread_target, daemon=True)
+    th.start()
+    th.join()
+
+    if "error" in error_box:
+        raise error_box["error"]
+    return result_box.get("result")
+
+
+def expose_cli(
+    *,
+    name: str,
+    model: type[BaseModel],
+    runner: t.Callable[[BaseModel], t.Awaitable[t.Any] | t.Any],
+    group: str | None = None,
+    help: str | None = None,
+) -> None:
+    grp = _get_group(group)
+    params: list[click.Parameter] = []
+
+    # Pydantic v2: model.model_fields; v1 fallback: model.__fields__
     try:
-        db_service, email_service = get_services()
-        
-        # Use asyncio to run the async usecase
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(
-            generate_file_confirmation_report(
-                db_service=db_service,
-                email_service=email_service,
-                target_date=process_date
+        fields = model.model_fields  # type: ignore[attr-defined]
+    except AttributeError:
+        fields = model.__fields__  # type: ignore[attr-defined]
+
+    field_defs: dict[str, t.Any] = {}
+    for fname, f in fields.items():
+        try:
+            annotation = f.annotation  # v2
+        except Exception:
+            annotation = getattr(f, "outer_type_", str)  # v1 fallback
+        field_defs[fname] = annotation
+
+    for fname, annotation in field_defs.items():
+        opt_name = f"--{fname.replace('_', '-')}"
+        click_type = _pytype_to_click(annotation)
+
+        if _is_list_type(annotation):
+            # IMPORTANT: multiple=True implies Click returns a tuple
+            # Use default=() instead of None for multiple options
+            params.append(
+                click.Option(
+                    param_decls=[opt_name],
+                    multiple=True,
+                    type=str,
+                    default=(),
+                    help=f"{fname} (repeat flag or comma-separated)",
+                    callback=lambda ctx, param, value: _flatten_comma_multiple(value),
+                )
+            )
+        else:
+            params.append(
+                click.Option(
+                    param_decls=[opt_name],
+                    type=click_type,
+                    default=None,
+                    help=f"{fname}",
+                )
+            )
+
+    if "html_body" in field_defs:
+        params.append(
+            click.Option(
+                param_decls=["--html-file"],
+                type=click.Path(path_type=Path, exists=True, dir_okay=False, readable=True),
+                default=None,
+                help="Path to an HTML file to populate html_body",
             )
         )
-        
-        if result.success:
-            click.secho(f"Successfully processed reports: {result.message}", fg="green")
-        else:
-            click.secho(f"Report processing completed with issues: {result.message}", fg="yellow")
-            
-    except Exception as e:
-        logger.error(f"Error processing reports: {e}")
-        click.secho(f"Failed to process reports: {e}", fg="red")
 
-@commands.command('test-email')
-def test_email():
-    """Test email connectivity"""
-    logger.info("Testing email connectivity...")
-    try:
-        _, email_service = get_services()
-        
-        # Test connection by trying to get the account/folder
-        # exchangelib will attempt to authenticate here
-        account = email_service._get_account()
-        # Accessing the sent folder is a good way to verify the connection works
-        _ = account.sent
-        
-        click.secho("Successfully connected to Exchange email server!", fg="green")
-            
-    except Exception as e:
-        logger.error(f"Email connection error: {e}")
-        click.secho(f"Error testing email connectivity: {e}", fg="red")
+    params.append(
+        click.Option(
+            param_decls=["--json"],
+            type=click.Path(path_type=Path, exists=True, dir_okay=False, readable=True),
+            default=None,
+            help="Path to JSON file providing the request body",
+        )
+    )
+
+    def _callback(**kwargs):
+        json_path: Path | None = kwargs.pop("json", None)
+        if json_path:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise click.ClickException("--json must contain an object")
+        else:
+            data = {}
+
+        # Load html from file if provided
+        html_file = kwargs.pop("html_file", None)
+        if html_file is not None:
+            data["html_body"] = Path(html_file).read_text(encoding="utf-8")
+
+        # Overlay CLI args (ignore None)
+        for k, v in kwargs.items():
+            if v is not None:
+                data[k] = v
+
+        try:
+            body = model(**data)
+        except Exception as e:
+            raise click.ClickException(f"Invalid arguments for {model.__name__}: {e}") from e
+
+        res = runner(body)
+        if inspect.iscoroutine(res):
+            res = _run_coroutine_sync(t.cast(t.Awaitable[t.Any], res))
+        if res is not None:
+            click.echo(res)
+        return res
+
+    cmd = click.Command(
+        name=name,
+        params=params,
+        callback=_callback,
+        help=help or f"{name} (auto-generated from {model.__name__})",
+    )
+    grp.add_command(cmd)
+
+
+# Backward compatibility: entry point may be referenced as "commands"
+commands = cli
+

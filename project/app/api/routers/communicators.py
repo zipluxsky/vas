@@ -1,65 +1,69 @@
-from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException
-import logging
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.schemas.communicators import (
-    CommunicatorResponse,
-    CommunicatorCreate,
-    ProcessingStatus
+from app.api.deps import get_email_service
+from app.services.email_service import EmailService
+from app.schemas.communicators import MatrixSendRequest
+
+# CLI registry + runner
+from app.core.cli import expose_cli
+from app.usecases.communicators import run_email_sender
+
+# logging
+from app.core.logging import LogManager
+
+router = APIRouter(
+    tags=["communicators"],
+    responses={404: {"description": "Not found"}},
 )
-from app.api.deps import get_db_service, verify_token
-from app.services.db_service import DatabaseService
-from app.usecases.communicators import process_communicator_files
 
-router = APIRouter()
-logger = logging.getLogger(__name__)
 
-@router.get("/", response_model=List[CommunicatorResponse])
-async def get_communicators(
-    skip: int = 0,
-    limit: int = 100,
-    db_service: DatabaseService = Depends(get_db_service),
-    token: dict = Depends(verify_token)
-) -> Any:
+@router.post(
+    "/email_sender",
+    summary="Send email using matrix configuration",
+    response_model=dict,
+)
+async def email_sender(
+    body: MatrixSendRequest,
+    svc: EmailService = Depends(get_email_service),
+):
     """
-    Retrieve all communicators.
+    Uses DI to send the email via the matrix configuration.
     """
+    log = LogManager(project=body.project, log_name="email_sender")
     try:
-        communicators = db_service.get_communicators(skip=skip, limit=limit)
-        return communicators
-    except Exception as e:
-        logger.error(f"Error fetching communicators: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.post("/process", response_model=ProcessingStatus)
-async def trigger_processing(
-    token: dict = Depends(verify_token)
-) -> Any:
-    """
-    Trigger the processing of communicator files in the background using Celery.
-    """
-    try:
-        # Schedule the processing task via Celery
-        task = process_communicator_files.delay()
-        
-        return ProcessingStatus(
-            status="accepted",
-            message=f"Processing task scheduled successfully with ID: {task.id}"
+        log.web_info("Starting email sender")
+        await svc.send(
+            project=body.project,
+            function=body.function,
+            html_body=body.html_body,
+            env=body.env,
+            subject_suffix=body.subject_suffix,
+            attachments=body.attachments,
         )
-    except Exception as e:
-        logger.error(f"Error scheduling processing task: {e}")
-        raise HTTPException(status_code=500, detail="Failed to schedule processing task")
+        log.web_info("Email sent OK")
 
-@router.get("/{communicator_id}", response_model=CommunicatorResponse)
-async def get_communicator(
-    communicator_id: int,
-    db_service: DatabaseService = Depends(get_db_service),
-    token: dict = Depends(verify_token)
-) -> Any:
-    """
-    Get a specific communicator by ID.
-    """
-    communicator = db_service.get_communicator_by_id(communicator_id)
-    if not communicator:
-        raise HTTPException(status_code=404, detail="Communicator not found")
-    return communicator
+        return {"ok": True, "log": log.flush_web()}
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to send email: {e}",
+        )
+    finally:
+        log.close()
+
+
+@router.get("/ping", summary="Communicators health")
+async def ping():
+    return {"status": "ok"}
+
+
+# --- AUTO-REGISTER CLI on module import ---
+expose_cli(
+    name="email-sender",
+    model=MatrixSendRequest,
+    runner=run_email_sender,
+    group="communicators",
+    help="Send email using matrix configuration (same as POST /communicators/email_sender).",
+)

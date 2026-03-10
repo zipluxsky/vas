@@ -1,4 +1,34 @@
+import copy
+from typing import List
+
 from fastapi.openapi.utils import get_openapi
+
+
+def get_openapi_schema_filtered_by_tags(app, include_tags: List[str]):
+    """
+    Return a copy of the app's OpenAPI schema containing only paths whose operations
+    have at least one tag in include_tags. Used for separate Swagger docs per tag group.
+    """
+    full = app.openapi()
+    schema = copy.deepcopy(full)
+    paths = schema.get("paths", {})
+    new_paths = {}
+    for path_key, path_item in paths.items():
+        if not isinstance(path_item, dict):
+            continue
+        new_path_item = {}
+        for key, value in path_item.items():
+            if key in ("get", "post", "put", "patch", "delete", "head", "options", "trace"):
+                if isinstance(value, dict) and set(value.get("tags", [])) & set(include_tags):
+                    new_path_item[key] = value
+            else:
+                new_path_item[key] = value
+        if any(k in new_path_item for k in ("get", "post", "put", "patch", "delete", "head", "options", "trace")):
+            new_paths[path_key] = new_path_item
+    schema["paths"] = new_paths
+    schema["tags"] = [t for t in schema.get("tags", []) if isinstance(t, dict) and t.get("name") in include_tags]
+    return schema
+
 
 def custom_openapi(app):
     """Generate custom OpenAPI schema for Swagger UI"""

@@ -2,13 +2,32 @@ import logging
 import os
 import csv
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-from app.api.deps import get_db_service
+from app.api.deps import get_db_service, get_email_service
 from app.core.config import settings
 from app.core.celery_app import celery_app
+from app.schemas.communicators import MatrixSendRequest
+from app.services.email_service import EmailService
 
 logger = logging.getLogger(__name__)
+
+
+async def run_email_sender(
+    body: MatrixSendRequest,
+    svc: Optional[EmailService] = None,
+) -> None:
+    """Send email via matrix configuration. Used by POST /communicators/email_sender and CLI email-sender."""
+    if svc is None:
+        svc = get_email_service()
+    await svc.send(
+        project=body.project,
+        function=body.function,
+        html_body=body.html_body or "",
+        env=body.env,
+        subject_suffix=body.subject_suffix,
+        attachments=body.attachments,
+    )
 
 @celery_app.task(name="process_communicator_files")
 def process_communicator_files():
@@ -78,13 +97,3 @@ def process_communicator_files():
             "files_processed": 0
         })
         return f"Error: {e}"
-
-
-@celery_app.task(name="trigger_processing")
-def trigger_processing(**kwargs) -> str:
-    """
-    Celery task with the same name as the router endpoint.
-    Runs the same logic as process_communicator_files so Option B (Airflow XML)
-    can trigger by task name "trigger_processing" without changing the API.
-    """
-    return process_communicator_files.apply()

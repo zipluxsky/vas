@@ -59,3 +59,22 @@ def setup_logging(level=None):
     logging.getLogger(__name__).info(
         f"Logging initialized at level {logging.getLevelName(level)}"
     )
+
+
+class LogManager:
+    """Per-request/per-operation log buffer for web/CLI (web_info, flush_web, close)."""
+
+    def __init__(self, project: str = "", log_name: str = ""):
+        self.project = project
+        self.log_name = log_name
+        self._lines: list = []
+
+    def web_info(self, msg: str) -> None:
+        self._lines.append(msg)
+        logging.getLogger(__name__).info(f"[{self.log_name}] {msg}")
+
+    def flush_web(self) -> str:
+        return "\n".join(self._lines)
+
+    def close(self) -> None:
+        self._lines.clear()

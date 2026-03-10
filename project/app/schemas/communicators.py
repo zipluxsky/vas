@@ -23,3 +23,13 @@ class ProcessingStatus(BaseModel):
     status: str
     message: str
     details: Optional[Dict[str, Any]] = None
+
+
+class MatrixSendRequest(BaseModel):
+    """Request body for sending email via matrix configuration (POST /communicators/email_sender)."""
+    project: str
+    function: str
+    html_body: str = ""
+    env: Optional[str] = None
+    subject_suffix: Optional[str] = None
+    attachments: Optional[List[str]] = None
