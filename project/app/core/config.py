@@ -107,10 +107,13 @@ class Settings(BaseSettings):
                         'isql_path': env_config.get('isql_path') or 'isql',
                     }
                     dsn = (env_config.get('server') or dsn_name).strip()
+                    logger.info("Sybase: env=%s, looking for odbc.ini section [%s]", self.ENVIRONMENT, dsn)
                     odbc = {}
                     for path in odbc_candidates:
                         odbc = _read_odbc_ini_section(path, dsn)
                         if odbc:
+                            logger.info("Sybase: matched [%s] in %s → host=%s port=%s db=%s",
+                                        dsn, path, odbc.get('host'), odbc.get('port'), odbc.get('database'))
                             break
                     for key, value in (odbc or {}).items():
                         if value is not None:
