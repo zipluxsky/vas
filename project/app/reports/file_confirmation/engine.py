@@ -29,13 +29,11 @@ class FileConfirmationEngine:
         logger.info(f"Starting file confirmation report generation for {target_date.date()}")
         
         try:
-            # 1. Fetch data from multiple sources
-            mysql_data = self._fetch_mysql_data(target_date)
+            # 1. Fetch data from Sybase
             sybase_data = self._fetch_sybase_data(target_date)
             
-            # 2. Consolidate and format data
-            merged_data = self._merge_data(mysql_data, sybase_data)
-            formatted_data = self.formatter.format_data(merged_data)
+            # 2. Format data
+            formatted_data = self.formatter.format_data(sybase_data)
 
             # 3. Write outputs
             output_paths = self._write_outputs(formatted_data, target_date)
@@ -59,23 +57,6 @@ class FileConfirmationEngine:
                 "output_paths": []
             }
 
-    def _fetch_mysql_data(self, target_date: datetime) -> List[Dict[str, Any]]:
-        """Fetch file processing records from MySQL"""
-        query = """
-            SELECT file_id, file_name, status, processing_time, communicator_id
-            FROM file_processing_logs
-            WHERE DATE(processing_time) = %s
-        """
-        try:
-            # Mock query for demonstration
-            return self.db_service.mysql.execute_query(
-                query, (target_date.strftime("%Y-%m-%d"),)
-            )
-        except Exception as e:
-            logger.error(f"MySQL fetch error: {e}")
-            # Return mock data for development
-            return [{"file_id": 1, "file_name": "test1.txt", "status": "SUCCESS"}]
-            
     def _fetch_sybase_data(self, target_date: datetime) -> List[Dict[str, Any]]:
         """Fetch related business data from Sybase. Uses _run_overrides (e.g. cpty from cmd) when set."""
         from app.services.sql_template_service import sql_templates
@@ -89,28 +70,6 @@ class FileConfirmationEngine:
             logger.error(f"Sybase fetch error: {e}")
             return [{"communicator_id": 1, "communicator_name": "CommA"}]
 
-    def _merge_data(self, mysql_data: List[Dict], sybase_data: List[Dict]) -> List[Dict]:
-        """Merge MySQL logging data with Sybase business data"""
-        # Convert to pandas for easier merging
-        if not mysql_data:
-            return []
-            
-        df_mysql = pd.DataFrame(mysql_data)
-        df_sybase = pd.DataFrame(sybase_data)
-        
-        if df_sybase.empty:
-            return df_mysql.to_dict('records')
-            
-        # Merge on communicator_id
-        merged = pd.merge(
-            df_mysql, 
-            df_sybase, 
-            on='communicator_id', 
-            how='left'
-        )
-        
-        return merged.to_dict('records')
-        
     def _write_outputs(self, data: List[Dict], target_date: datetime) -> List[str]:
         """Write reports to configured output formats"""
         outputs = []
