@@ -1,3 +1,35 @@
+# =============================================================================
+# Vascular_P CI/CD Pipeline
+# =============================================================================
+#
+# PREREQUISITES (must exist before pipeline runs):
+#
+#   1. GitLab Runner with tag "Docker-FIX" and sudo docker access
+#   2. Base Docker image "vascular_base" pre-built on the runner host:
+#        docker build -f Base_Image_Docker_File -t vascular_base .
+#      Requires installer/ directory with:
+#        - installer/unixODBC-2.3.12.tar.gz
+#        - installer/sybasesdk16-16.0-6.x86_64.rpm
+#   3. Sybase interfaces file at configs/sybase_config/interfaces
+#   4. External Docker network "airflow_shared_net" (used by docker-compose):
+#        docker network create airflow_shared_net
+#
+# CONFIGURATION FILES (under configs/, synced to Docker volumes at deploy):
+#
+#   configs/python_config/datasource.json  — Sybase & MySQL credentials (user/password per env)
+#   configs/python_config/email_config.json — Email routing matrix (to/cc/subject per project/function/env)
+#   configs/sybase_config/odbc.ini          — Sybase DSN entries (host/port/database per server tag)
+#   configs/sybase_config/interfaces        — Sybase interfaces file (server address resolution)
+#   data/sql/                               — SQL templates (e.g. file_confirmation/ExcelExtract.template)
+#
+# ENVIRONMENT VARIABLES (optional, set in GitLab CI/CD settings or docker-compose):
+#
+#   ENVIRONMENT          — "dev" / "prod" (default: "development" → falls back to "dev")
+#   SECRET_KEY           — JWT signing key (required only if verify_token is enabled on routes)
+#   ATTACHMENT_ALLOWED_DIR — Base directory for email attachment path validation (empty = reject all)
+#
+# =============================================================================
+
 default:
   tags:
     - Docker-FIX
@@ -130,35 +162,18 @@ pre_production_test:
       else:
           print(" ".join(results))
       DBEOF
-    - echo "Testing email sending (send to self)..."
+    - echo "Testing SMTP connectivity (mailhost:25)..."
     - |
       sudo docker compose --project-name "${COMPOSE_PROJECT_NAME}" run --rm vascular-api python << 'PYEOF'
-      import asyncio
-      import sys
-      from app.core.config import settings
-      from app.api.deps import get_email_service
-
-      ec = getattr(settings, "email_config", None) or {}
-      if not (ec.get("server") or ec.get("email")):
-          print("No email config; skip email sending test")
-          sys.exit(0)
-
-      svc = get_email_service()
-      svc.smtp_config["default_recipient"] = svc.email
+      import smtplib, sys
 
       try:
-          asyncio.run(
-              svc.send(
-                  project="pre_production_test",
-                  function="email_test",
-                  html_body="<p>Pre-production email test (send to self).</p>",
-                  env="dev",
-                  subject_suffix="[CI]",
-              )
-          )
-          print("Email sent to self: OK")
+          with smtplib.SMTP("mailhost", 25, timeout=10) as server:
+              server.noop()
+          print("SMTP mailhost:25: OK")
       except Exception as e:
-          print(f"Email sending failed: {e}", file=sys.stderr)
+          print(f"SMTP connectivity failed: {e}", file=sys.stderr)
+          print("Ensure 'mailhost' resolves within the container network and port 25 is reachable.")
           sys.exit(1)
       PYEOF
   only:

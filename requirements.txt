@@ -6,7 +6,6 @@ sqlalchemy
 pymysql
 celery
 redis
-exchangelib
 jinja2
 pandas
 openpyxl
