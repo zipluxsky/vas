@@ -118,6 +118,16 @@ class ISQLDatabase(BaseDatabase):
                 
         return formatted_query
 
+    def execute_raw_query(self, query: str, params: tuple = None) -> str:
+        """Execute query and return the raw isql text output (no parsing)."""
+        if not self.host or self.port is None or not self.user or not self.database:
+            raise Exception(
+                f"Sybase config incomplete (host={self.host}, port={self.port}, "
+                f"user={'set' if self.user else None}, database={self.database})"
+            )
+        formatted_query = self._format_query(query, params)
+        return self._run_isql(formatted_query)
+
     def execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """
         Execute query and parse CSV-like output.

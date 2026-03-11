@@ -73,8 +73,16 @@ class LogManager:
         self._lines.append(msg)
         logging.getLogger(__name__).info(f"[{self.log_name}] {msg}")
 
+    def fastapi_log(self, msg, show_in_web: int = 1) -> None:
+        if show_in_web:
+            self._lines.append(str(msg))
+        logging.getLogger(__name__).info(f"[{self.log_name}] {msg}")
+
     def flush_web(self) -> str:
         return "\n".join(self._lines)
+
+    def gen_fastapi_log(self) -> str:
+        return "<br>\n".join(self._lines)
 
     def close(self) -> None:
         self._lines.clear()

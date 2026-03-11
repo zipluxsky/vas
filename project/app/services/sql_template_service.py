@@ -56,6 +56,7 @@ class SqlTemplateService:
                 # But since the template HAS {cpty}, we MUST replace it if we want to follow the file.
                 query = query.replace(f"${{{key}}}", str(value))
                 query = query.replace(f"{{{key}}}", str(value))
+                query = query.replace(f"###{key}###", str(value))
                 
         # Check for unreplaced parameters
         unreplaced_shell = re.findall(r'\$\{([^}]+)\}', query)

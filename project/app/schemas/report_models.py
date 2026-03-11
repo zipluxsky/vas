@@ -23,3 +23,5 @@ class ReportGenerationResponse(BaseModel):
     output_paths: List[str] = []
     record_count: int = 0
     errors: List[str] = []
+    html_body: str = ""
+    log_html: str = ""

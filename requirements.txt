@@ -9,6 +9,7 @@ redis
 jinja2
 pandas
 openpyxl
+pyyaml
 aiofiles
 python-multipart
 python-jose[cryptography]

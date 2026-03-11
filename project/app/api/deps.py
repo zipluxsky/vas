@@ -14,11 +14,23 @@ logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/login/access-token")
 
-def get_db_service() -> DatabaseService:
-    """Dependency to provide DatabaseService instance"""
-    mysql_db = MySQLDatabase(settings.db_config.get('mysql', {}))
-    sybase_db = ISQLDatabase(settings.db_config.get('sybase', {}))
-    
+def get_db_service(env: str = None) -> DatabaseService:
+    """Provide DatabaseService instance. When *env* is given, use that environment's config."""
+    if env:
+        sybase_cfg = settings.db_config.get('sybase_envs', {}).get(env)
+        mysql_cfg = settings.db_config.get('mysql_envs', {}).get(env)
+        if sybase_cfg is None:
+            logger.warning("No sybase config for env=%s, falling back to default", env)
+        if mysql_cfg is None:
+            logger.warning("No mysql config for env=%s, falling back to default", env)
+        sybase_cfg = sybase_cfg or settings.db_config.get('sybase', {})
+        mysql_cfg = mysql_cfg or settings.db_config.get('mysql', {})
+    else:
+        sybase_cfg = settings.db_config.get('sybase', {})
+        mysql_cfg = settings.db_config.get('mysql', {})
+
+    mysql_db = MySQLDatabase(mysql_cfg)
+    sybase_db = ISQLDatabase(sybase_cfg)
     return DatabaseService(mysql_db, sybase_db)
 
 def get_email_service() -> EmailService:

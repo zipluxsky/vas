@@ -76,12 +76,12 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         self.load_configs()
         
-    def _pick_env_config(self, envs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Select the best matching environment config. Tries ENVIRONMENT, then dev, prod, then first available."""
+    def _pick_env_name(self, envs: Dict[str, Any]) -> str:
+        """Return the best matching env key. Tries ENVIRONMENT, then dev, prod, then first available."""
         for candidate in (self.ENVIRONMENT, "dev", "prod"):
             if candidate in envs:
-                return envs[candidate]
-        return next(iter(envs.values()), None) if envs else None
+                return candidate
+        return next(iter(envs), "dev") if envs else "dev"
 
     def load_configs(self):
         """Load database and email configuration from datasource.json, odbc.ini, and email_config.json."""
@@ -95,55 +95,62 @@ class Settings(BaseSettings):
                 with open(datasource_path, 'r') as f:
                     ds_data = json.load(f)
 
-                # --- Sybase: database.sybase.<dsn_name>.<env> ---
+                # --- Sybase: load ALL envs so callers can select at runtime ---
+                sybase_envs: Dict[str, Any] = {}
                 sybase_dsns = ds_data.get("database", {}).get("sybase", {})
                 for dsn_name, envs in sybase_dsns.items():
-                    env_config = self._pick_env_config(envs)
-                    if env_config is None:
-                        continue
-                    self.db_config['sybase'] = {
-                        'user': env_config.get('user'),
-                        'password': env_config.get('password'),
-                        'isql_path': env_config.get('isql_path') or 'isql',
-                    }
-                    dsn = (env_config.get('server') or dsn_name).strip()
-                    logger.info("Sybase: env=%s, looking for odbc.ini section [%s]", self.ENVIRONMENT, dsn)
-                    odbc = {}
-                    for path in odbc_candidates:
-                        odbc = _read_odbc_ini_section(path, dsn)
-                        if odbc:
-                            logger.info("Sybase: matched [%s] in %s → host=%s port=%s db=%s",
-                                        dsn, path, odbc.get('host'), odbc.get('port'), odbc.get('database'))
-                            break
-                    for key, value in (odbc or {}).items():
-                        if value is not None:
-                            self.db_config['sybase'][key] = value
-                    sb = self.db_config['sybase']
-                    if not odbc or sb.get('host') is None or sb.get('port') is None or not sb.get('database'):
-                        logger.warning(
-                            "Sybase host/port/database missing: ensure odbc.ini exists at configs/sybase_config/odbc.ini "
-                            "with a section matching datasource server value (e.g. [%s]) and Server, Port, Database keys",
-                            dsn,
-                        )
+                    for env_name, env_config in envs.items():
+                        cfg: Dict[str, Any] = {
+                            'user': env_config.get('user'),
+                            'password': env_config.get('password'),
+                            'isql_path': env_config.get('isql_path') or 'isql',
+                        }
+                        dsn = (env_config.get('server') or dsn_name).strip()
+                        odbc: Dict[str, Any] = {}
+                        for path in odbc_candidates:
+                            odbc = _read_odbc_ini_section(path, dsn)
+                            if odbc:
+                                break
+                        for key, value in odbc.items():
+                            if value is not None:
+                                cfg[key] = value
+                        if not odbc or not cfg.get('host') or cfg.get('port') is None or not cfg.get('database'):
+                            logger.warning(
+                                "Sybase [%s] env=%s: host/port/database missing – "
+                                "ensure odbc.ini has section [%s] with Server, Port, Database",
+                                dsn_name, env_name, dsn,
+                            )
+                        else:
+                            logger.info(
+                                "Sybase [%s] env=%s: matched [%s] → host=%s port=%s db=%s",
+                                dsn_name, env_name, dsn,
+                                cfg.get('host'), cfg.get('port'), cfg.get('database'),
+                            )
+                        sybase_envs[env_name] = cfg
                     break
+                self.db_config['sybase_envs'] = sybase_envs
+                default_env = self._pick_env_name(sybase_envs)
+                self.db_config['sybase'] = sybase_envs.get(default_env, {})
 
-                # --- MySQL: mysql.<dsn_name>.<env> ---
+                # --- MySQL: load ALL envs ---
+                mysql_envs: Dict[str, Any] = {}
                 mysql_dsns = ds_data.get("mysql", {})
                 for dsn_name, envs in mysql_dsns.items():
-                    env_config = self._pick_env_config(envs)
-                    if env_config is None:
-                        continue
-                    self.db_config['mysql'] = {
-                        'user': env_config.get('user'),
-                        'password': env_config.get('password'),
-                    }
-                    if env_config.get('server'):
-                        self.db_config['mysql']['host'] = env_config['server']
-                    if env_config.get('port') is not None:
-                        self.db_config['mysql']['port'] = env_config['port']
-                    if env_config.get('database'):
-                        self.db_config['mysql']['database'] = env_config['database']
+                    for env_name, env_config in envs.items():
+                        m_cfg: Dict[str, Any] = {
+                            'user': env_config.get('user'),
+                            'password': env_config.get('password'),
+                        }
+                        if env_config.get('server'):
+                            m_cfg['host'] = env_config['server']
+                        if env_config.get('port') is not None:
+                            m_cfg['port'] = env_config['port']
+                        if env_config.get('database'):
+                            m_cfg['database'] = env_config['database']
+                        mysql_envs[env_name] = m_cfg
                     break
+                self.db_config['mysql_envs'] = mysql_envs
+                self.db_config['mysql'] = mysql_envs.get(default_env, {})
             else:
                 logger.warning(f"Datasource config file not found at {datasource_path}")
 

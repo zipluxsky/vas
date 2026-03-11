@@ -1,23 +1,17 @@
+import json
 import logging
+import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
+from app.core.config import settings
+from app.core.logging import LogManager
+from app.reports.file_confirmation.engine import FileConfirmationEngine
+from app.schemas.report_models import FileConfirmationInput, ReportGenerationResponse
 from app.services.db_service import DatabaseService
 from app.services.email_service import EmailService
-from app.reports.file_confirmation.engine import FileConfirmationEngine
-from app.schemas.report_models import ReportGenerationResponse, FileConfirmationInput
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_trade_date(trade_date: str) -> datetime:
-    """Parse trade_date (YYYYMMDD) to datetime. Returns today if invalid or default."""
-    if not trade_date or trade_date == "19000101":
-        return datetime.now()
-    try:
-        return datetime.strptime(trade_date.strip(), "%Y%m%d")
-    except ValueError:
-        return datetime.now()
 
 
 async def run_file_confirmation(
@@ -26,90 +20,78 @@ async def run_file_confirmation(
     db_service: Optional[DatabaseService] = None,
     email_service: Optional[EmailService] = None,
 ) -> Dict[str, Any]:
-    """
-    Run file confirmation report.
+    """Run file confirmation report using the full legacy engine.
+
     Returns {"html": str, "output_paths": list[str], "success": bool}.
     """
     if db_service is None or email_service is None:
         from app.api.deps import get_db_service, get_email_service
-        db_service = get_db_service()
+
+        db_service = get_db_service(env=cmd.env)
         email_service = get_email_service()
-    target_dt = _parse_trade_date(cmd.trade_date)
-    result = await generate_file_confirmation_report(
-        db_service=db_service,
-        email_service=email_service,
-        cmd=cmd,
-        target_date=target_dt,
-    )
-    html_parts = [
-        "<!DOCTYPE html><html><head><meta charset='utf-8'><title>File Confirmation Report</title></head><body>",
-        "<h1>File Confirmation Report</h1>",
-        f"<p><strong>Success:</strong> {result.success}</p>",
-        f"<p><strong>Message:</strong> {result.message}</p>",
-        f"<p><strong>Record count:</strong> {result.record_count}</p>",
-    ]
-    if result.output_paths:
-        html_parts.append("<p><strong>Output paths:</strong></p><ul>")
-        for p in result.output_paths:
-            html_parts.append(f"<li>{p}</li>")
-        html_parts.append("</ul>")
-    html_parts.append("</body></html>")
+
+    log_manager = LogManager("monitor", "fc_%s" % host)
+
+    engine = FileConfirmationEngine(db_service)
+    result = engine.generate(cmd, log_manager)
+
+    output_paths = result.get("output_paths", [])
+    html_body = result.get("html_body", "")
+    log_html = result.get("log_html", "")
+    success = result.get("success", False)
+
+    # --- delivery branch (mirrors legacy lines 608-620) ---
+    if cmd.by == "download":
+        return {
+            "html": log_html,
+            "output_paths": output_paths,
+            "success": success,
+        }
+
+    if cmd.send_file and output_paths:
+        try:
+            await email_service.send(
+                project="confirmation",
+                function="file_confirmation",
+                html_body=html_body,
+                env=cmd.env,
+                subject_suffix=cmd.trade_date if cmd.trade_date != "19000101" else None,
+                attachments=output_paths,
+            )
+        except Exception as e:
+            logger.warning("Report generated but email sending failed: %s", e)
+    elif not cmd.send_file:
+        _save_email_cache(cmd, host, html_body, output_paths)
+
     return {
-        "html": "".join(html_parts),
-        "output_paths": result.output_paths,
-        "success": result.success,
+        "html": log_html,
+        "output_paths": output_paths,
+        "success": success,
     }
 
 
-async def generate_file_confirmation_report(
-    db_service: DatabaseService,
-    email_service: EmailService,
+def _save_email_cache(
     cmd: FileConfirmationInput,
-    target_date: Optional[datetime] = None,
-) -> ReportGenerationResponse:
-    """Generate and distribute the file confirmation report. Uses cmd.cpty, cmd.by, cmd.send_file for engine/email."""
-    if target_date is None:
-        target_date = datetime.now()
+    host: str,
+    str_body: str,
+    str_files: list,
+) -> None:
+    """Persist temp email data for deferred sending (legacy send_file=False path)."""
+    cache_dir = os.path.join(str(settings.BASE_DIR.parent), "email_cache")
+    os.makedirs(cache_dir, exist_ok=True)
 
-    logger.info(f"Initiating file confirmation report for {target_date.date()} (cpty={cmd.cpty}, by={cmd.by}, env={cmd.env})")
-
-    try:
-        # File confirmation uses inline defaults; no external config file.
-        config = {"formats": ["csv"], "formatting": {}}
-        overrides = cmd.model_dump()
-
-        # Initialize engine and generate with overrides
-        engine = FileConfirmationEngine(db_service, config)
-        result = engine.generate(target_date, overrides=overrides)
-
-        if not result.get("success"):
-            return ReportGenerationResponse(
-                success=False,
-                message=f"Generation failed: {result.get('error')}"
-            )
-
-        # Send via email only when send_file=True and by=email
-        output_paths = result.get("output_paths", [])
-        if output_paths and cmd.send_file and cmd.by == "email":
-            email_sent = email_service.send_report(
-                "File Confirmation",
-                output_paths,
-                target_date,
-                env=cmd.env,
-            )
-            if not email_sent:
-                logger.warning("Report generated but email sending failed")
-                
-        return ReportGenerationResponse(
-            success=True,
-            message="Report generated successfully",
-            output_paths=output_paths,
-            record_count=result.get("record_count", 0)
-        )
-        
-    except Exception as e:
-        logger.error(f"Unhandled error in report generation: {e}")
-        return ReportGenerationResponse(
-            success=False,
-            message=str(e)
-        )
+    td = cmd.trade_date if cmd.trade_date != "19000101" else datetime.now().strftime("%Y%m%d")
+    temp_data = {
+        cmd.cpty: {
+            "str_body": str_body,
+            "destination": host,
+            "env": cmd.env,
+            "host": host,
+            "s_date": td,
+            "str_files": str_files,
+        }
+    }
+    path = os.path.join(cache_dir, f"{cmd.cpty}_{td}_temp_email_data.json")
+    with open(path, "w") as f:
+        json.dump(temp_data, f)
+    logger.info("Saved email cache to %s", path)
