@@ -195,7 +195,7 @@ class FileConfirmationEngine:
 
         raw_lines = raw_output.split("\n")
         lines_raw = [l for l in raw_lines if l.strip()]
-        # Remove informational lines
+        # Remove informational lines produced by isql
         lines_raw = [
             l
             for l in lines_raw
@@ -203,15 +203,38 @@ class FileConfirmationEngine:
             and not l.strip().lower().endswith("rows affected)")
         ]
 
+        # Find the separator row (all dashes/commas/spaces) — everything
+        # before it is noise (e.g. "Database changed" from USE), the line
+        # before the separator is the header.
+        sep_idx = None
+        for idx, l in enumerate(lines_raw):
+            if all(c in "-," or c.isspace() for c in l) and "," in l:
+                sep_idx = idx
+                break
+
+        if sep_idx is None or sep_idx < 1:
+            log_manager.fastapi_log("Error - Cannot locate header/separator in SQL result")
+            return self._result_from_log(log_manager)
+
+        # Keep header (line before separator) + data (lines after separator)
+        lines_raw = [lines_raw[sep_idx - 1]] + lines_raw[sep_idx + 1:]
+
         if len(lines_raw) < 2:
             log_manager.fastapi_log("Error - No data rows in SQL result")
             return self._result_from_log(log_manager)
 
-        # Remove 2nd row (separator) and trim
-        del lines_raw[1]
+        # Split by comma, strip leading/trailing empty fields (-o file format)
         lines = [(i.split(","))[1:-1] for i in lines_raw]
         for i in lines:
             i[:] = [x.strip() for x in i]
+
+        # Determine expected column count from header and drop short rows
+        expected_cols = len(lines[0])
+        lines = [i for i in lines if len(i) == expected_cols]
+
+        if len(lines) < 1:
+            log_manager.fastapi_log("Error - No valid rows after parsing")
+            return self._result_from_log(log_manager)
 
         cptyColIdx = lines[0].index(cptyCol) if cptyCol in lines[0] else cptyColIdx
         allocColIdx = lines[0].index(allocCol) if allocCol in lines[0] else allocColIdx
@@ -222,7 +245,7 @@ class FileConfirmationEngine:
             with open(exclfile, "rt") as f:
                 for i in f:
                     allocid = i.split(",")
-        lines = [i for i in lines if i[allocColIdx] not in allocid]
+        lines = [i for i in lines if len(i) > allocColIdx and i[allocColIdx] not in allocid]
         log_manager.fastapi_log("Excl. Alloc: " + str(len(allocid)))
 
         # --- (i) Per-counterparty formatting ---
