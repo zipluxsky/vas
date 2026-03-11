@@ -62,12 +62,12 @@ class ISQLDatabase(BaseDatabase):
             # -s "," sets output separator to comma for easier parsing
             cmd = [
                 self.isql_path,
-                "-U", self.user,
-                "-P", self.password,
-                "-S", f"{self.host}:{self.port}" if self.port else self.host,
+                "-U", self.user or "",
+                "-P", self.password or "",
+                "-S", f"{self.host}:{self.port}" if self.port else (self.host or ""),
                 "-i", sql_file,
                 "-s", ",",
-                "-w", "2000" # wide output to prevent wrapping
+                "-w", "2000"
             ]
             
             logger.debug(f"Executing ISQL command for query: {query[:50]}...")
@@ -122,6 +122,11 @@ class ISQLDatabase(BaseDatabase):
         """
         Execute query and parse CSV-like output.
         """
+        if not self.host or self.port is None or not self.user or not self.database:
+            raise Exception(
+                f"Sybase config incomplete (host={self.host}, port={self.port}, "
+                f"user={'set' if self.user else None}, database={self.database})"
+            )
         formatted_query = self._format_query(query, params)
         output = self._run_isql(formatted_query)
         return self._parse_isql_output(output)
