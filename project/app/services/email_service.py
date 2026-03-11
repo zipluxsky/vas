@@ -1,15 +1,21 @@
-import os
+import smtplib
 import logging
 import asyncio
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
-from exchangelib import DELEGATE, Account, Credentials, Configuration, Message, Mailbox, HTMLBody, FileAttachment
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+SMTP_HOST = "mailhost"
+SMTP_PORT = 25
 
 
 def _resolve_allowed_attachment_paths(allowed_base: str, paths: Optional[List[str]]) -> List[Path]:
@@ -30,10 +36,6 @@ def _resolve_allowed_attachment_paths(allowed_base: str, paths: Optional[List[st
         if not (p and str(p).strip()):
             continue
         path = Path(p).resolve()
-        try:
-            path = path.resolve()
-        except (OSError, RuntimeError):
-            raise ValueError(f"Invalid attachment path: {p!r}")
         if not path.is_file():
             logger.warning(f"Attachment path is not a file or does not exist: {path}")
             continue
@@ -44,90 +46,108 @@ def _resolve_allowed_attachment_paths(allowed_base: str, paths: Optional[List[st
         resolved.append(path)
     return resolved
 
+
 class EmailService:
-    def __init__(self, username, password, email, server="mail.vasi.com"):
-        self.username = username
-        self.password = password
-        self.email = email
-        self.server = server
-        
-        # Save config for fallback behavior mimicking the old client config setup if needed
-        self.smtp_config = {"default_recipient": "admin@example.com"}
-        
-        self.credentials = Credentials(username, password)
-        self.config = Configuration(server=server, credentials=self.credentials)
-        self.account = Account(
-            primary_smtp_address=email,
-            config=self.config,
-            autodiscover=False,
-            access_type=DELEGATE
-        )
+    def __init__(self, email_config: Dict[str, Any]):
+        self.email_config = email_config
 
         template_dir = settings.BASE_DIR / "app" / "templates" / "email"
         self.env = Environment(loader=FileSystemLoader(str(template_dir)))
 
-    def _get_account(self):
-        return self.account
+    def _send_smtp(self, msg: MIMEMultipart) -> bool:
+        try:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                server.send_message(msg)
+            return True
+        except Exception as e:
+            logger.error(f"SMTP send failed: {e}")
+            return False
 
-    def send_email(self, to_addresses: List[str], subject: str, template_name: str, context: dict, attachment_paths: List[str] = None):
+    def _attach_files(self, msg: MIMEMultipart, paths: List[Path]):
+        for path in paths:
+            part = MIMEBase("application", "octet-stream")
+            with open(path, "rb") as f:
+                part.set_payload(f.read())
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", f"attachment; filename={path.name}")
+            msg.attach(part)
+
+    def _lookup_email_config(self, project: str, function: str) -> Dict[str, Any]:
+        """Look up email routing config by project (domain_name) and function (scenario_name)."""
+        domain = self.email_config.get(project, {})
+        scenario = domain.get(function, {})
+        return scenario.get("email", {})
+
+    def send_email(
+        self,
+        to_addresses: List[str],
+        subject: str,
+        template_name: str,
+        context: dict,
+        attachment_paths: List[str] = None,
+        send_from: str = None,
+        cc_addresses: List[str] = None,
+    ) -> bool:
         try:
             template = self.env.get_template(template_name)
             html_content = template.render(context)
-    
-            m = Message(
-                account=self.account,
-                folder=self.account.sent,
-                subject=subject,
-                body=HTMLBody(html_content),
-                to_recipients=[Mailbox(email_address=addr) for addr in to_addresses]
-            )
-    
+
+            msg = MIMEMultipart()
+            msg["Subject"] = subject
+            msg["From"] = send_from or "noreply@vasi.com"
+            msg["To"] = ", ".join(to_addresses)
+            if cc_addresses:
+                msg["Cc"] = ", ".join(cc_addresses)
+            msg.attach(MIMEText(html_content, "html"))
+
             if attachment_paths:
                 allowed = _resolve_allowed_attachment_paths(
                     settings.ATTACHMENT_ALLOWED_DIR, attachment_paths
                 )
-                for attachment_path in allowed:
-                    with open(attachment_path, 'rb') as f:
-                        content = f.read()
-                    attachment = FileAttachment(
-                        name=attachment_path.name,
-                        content=content
-                    )
-                    m.attach(attachment)
-    
-            m.send_and_save()
-            return True
+                self._attach_files(msg, allowed)
+
+            all_recipients = list(to_addresses) + (cc_addresses or [])
+            return self._send_smtp(msg)
         except Exception as e:
             logger.error(f"Failed to send email to {to_addresses}: {e}")
             return False
 
-    def send_report(self, report_name: str, file_paths: List[str], target_date: datetime) -> bool:
-        """Wrapper method to maintain compatibility with existing Usecases"""
+    def send_report(
+        self,
+        report_name: str,
+        file_paths: List[str],
+        target_date: datetime,
+        project: str = "",
+        function: str = "",
+        env: Optional[str] = None,
+    ) -> bool:
+        """Send report email with attachments. Looks up recipients from email_config matrix."""
+        cfg = self._lookup_email_config(project or report_name, function or report_name)
+        env_key = env or settings.ENVIRONMENT
+
+        send_from = cfg.get("send_from", "noreply@vasi.com")
+        to_addresses = cfg.get("to_addresses", {}).get(env_key, [])
+        cc_addresses = cfg.get("cc_addresses", {}).get(env_key, [])
+
+        if not to_addresses:
+            logger.warning(f"No to_addresses found for report={report_name}, env={env_key}; skipping send")
+            return False
+
         date_str = target_date.strftime("%Y-%m-%d")
-        subject = f"Automated Report: {report_name} - {date_str}"
-        
-        # For this generic wrapper, we'll try to use a basic template or fallback to a hardcoded html
-        # Depending on if a specific report template exists, we can pass context.
-        # Assume there's a generic template 'report_email.html' or similar. 
-        # If the template doesn't exist, jinja will throw an error, which send_email will catch.
-        # But for safety, you should ensure a generic template exists in the directory.
+        subject = cfg.get("subject", f"Automated Report: {report_name}") + f" - {date_str}"
         context = {
             "report_name": report_name,
             "date_str": date_str,
-            "message": f"Please find attached the {report_name} report for {date_str}."
+            "message": f"Please find attached the {report_name} report for {date_str}.",
         }
-        
-        # Use default recipient from config or define logic to lookup based on report type
-        to_address = self.smtp_config.get("default_recipient", "admin@example.com")
-        
-        # We assume a template 'report_email.html' might be created. 
-        # For now, it will look for it.
         return self.send_email(
-            to_addresses=[to_address],
+            to_addresses=to_addresses,
             subject=subject,
-            template_name="report_email.html", 
+            template_name="report_email.html",
             context=context,
-            attachment_paths=file_paths
+            attachment_paths=file_paths,
+            send_from=send_from,
+            cc_addresses=cc_addresses,
         )
 
     async def send(
@@ -140,27 +160,38 @@ class EmailService:
         attachments: Optional[List[str]] = None,
     ) -> None:
         """Send email using matrix configuration (project/function/env). Used by POST /communicators/email_sender."""
-        subject = f"{project} / {function}"
+        cfg = self._lookup_email_config(project, function)
+        if not cfg:
+            logger.warning(f"No email config found for project={project}, function={function}")
+            return
+
+        env_key = env or settings.ENVIRONMENT
+        to_addresses = cfg.get("to_addresses", {}).get(env_key, [])
+        cc_addresses = cfg.get("cc_addresses", {}).get(env_key, [])
+        send_from = cfg.get("send_from", "noreply@vasi.com")
+
+        subject = cfg.get("subject", f"{project} / {function}")
         if subject_suffix:
             subject = f"{subject} {subject_suffix}"
-        to_address = self.smtp_config.get("default_recipient", "admin@example.com")
-        context = {"body": html_body, "project": project, "function": function}
-        # Use raw html_body if no template; send_email uses template. So we need a small inline send.
+
+        body = html_body or cfg.get("message", "(no body)")
+
         def _do_send():
-            m = Message(
-                account=self.account,
-                folder=self.account.sent,
-                subject=subject,
-                body=HTMLBody(html_body or "(no body)"),
-                to_recipients=[Mailbox(email_address=to_address)],
-            )
+            msg = MIMEMultipart()
+            msg["Subject"] = subject
+            msg["From"] = send_from
+            msg["To"] = ", ".join(to_addresses)
+            if cc_addresses:
+                msg["Cc"] = ", ".join(cc_addresses)
+            msg.attach(MIMEText(body, "html"))
+
             if attachments:
                 allowed_paths = _resolve_allowed_attachment_paths(
                     settings.ATTACHMENT_ALLOWED_DIR, attachments
                 )
-                for path in allowed_paths:
-                    with open(path, "rb") as f:
-                        m.attach(FileAttachment(name=path.name, content=f.read()))
-            m.send_and_save()
+                self._attach_files(msg, allowed_paths)
+
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                server.send_message(msg)
 
         await asyncio.to_thread(_do_send)

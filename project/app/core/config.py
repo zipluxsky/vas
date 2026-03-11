@@ -106,9 +106,10 @@ class Settings(BaseSettings):
                         'password': env_config.get('password'),
                         'isql_path': env_config.get('isql_path') or 'isql',
                     }
+                    dsn = (env_config.get('server') or dsn_name).strip()
                     odbc = {}
                     for path in odbc_candidates:
-                        odbc = _read_odbc_ini_section(path, dsn_name)
+                        odbc = _read_odbc_ini_section(path, dsn)
                         if odbc:
                             break
                     for key, value in (odbc or {}).items():
@@ -118,8 +119,8 @@ class Settings(BaseSettings):
                     if not odbc or sb.get('host') is None or sb.get('port') is None or not sb.get('database'):
                         logger.warning(
                             "Sybase host/port/database missing: ensure odbc.ini exists at configs/sybase_config/odbc.ini "
-                            "with a section matching datasource DSN name (e.g. [%s]) and Server, Port, Database keys",
-                            dsn_name,
+                            "with a section matching datasource server value (e.g. [%s]) and Server, Port, Database keys",
+                            dsn,
                         )
                     break
 

@@ -9,7 +9,6 @@ from app.services.db_service import DatabaseService
 from app.services.email_service import EmailService
 from app.integrations.db.mysql import MySQLDatabase
 from app.integrations.db.isql import ISQLDatabase
-from app.integrations.email_client import EmailClient
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +23,7 @@ def get_db_service() -> DatabaseService:
 
 def get_email_service() -> EmailService:
     """Dependency to provide EmailService instance"""
-    # Initialize new EmailService using settings directly
-    # Assumes email_config contains 'username', 'password', 'email', and 'server'
-    email_config = settings.email_config
-    return EmailService(
-        username=email_config.get("username", "admin"),
-        password=email_config.get("password", ""),
-        email=email_config.get("email", "admin@vasi.com"),
-        server=email_config.get("server", "mail.vasi.com")
-    )
+    return EmailService(email_config=settings.email_config)
 
 def verify_token(token: str = Depends(oauth2_scheme)):
     """Verify JWT token for standard authentication. Requires SECRET_KEY to be set in environment."""
