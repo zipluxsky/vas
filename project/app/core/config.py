@@ -76,18 +76,16 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         self.load_configs()
         
+    def _pick_env_config(self, envs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Select the best matching environment config. Tries ENVIRONMENT, then dev, prod, then first available."""
+        for candidate in (self.ENVIRONMENT, "dev", "prod"):
+            if candidate in envs:
+                return envs[candidate]
+        return next(iter(envs.values()), None) if envs else None
+
     def load_configs(self):
-        """Load external configuration files"""
+        """Load database and email configuration from datasource.json, odbc.ini, and email_config.json."""
         try:
-            config_path = self.BASE_DIR / "config.json"
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    data = json.load(f)
-                    self.db_config = data.get("db", {})
-            else:
-                logger.warning(f"Config file not found at {config_path}, using defaults")
-                
-            # Load datasource configuration (user/password) and odbc.ini (host, port, database)
             datasource_path = self.BASE_DIR.parent / "configs" / "python_config" / "datasource.json"
             odbc_candidates = [
                 self.BASE_DIR.parent / "configs" / "sybase_config" / "odbc.ini",
@@ -96,38 +94,55 @@ class Settings(BaseSettings):
             if datasource_path.exists():
                 with open(datasource_path, 'r') as f:
                     ds_data = json.load(f)
-                    db_root = ds_data.get("database", {})
-                    for db_name, envs in db_root.items():
-                        env = self.ENVIRONMENT if self.ENVIRONMENT in envs else "dev"
-                        if env in envs:
-                            env_config = envs[env]
-                            if 'sybase' not in self.db_config:
-                                self.db_config['sybase'] = {}
-                            # User and password from datasource.json only
-                            self.db_config['sybase']['user'] = env_config.get('user')
-                            self.db_config['sybase']['password'] = env_config.get('password')
-                            if 'isql_path' in env_config:
-                                self.db_config['sybase']['isql_path'] = env_config.get('isql_path')
-                            # Host, port, database from odbc.ini: datasource "server" value = odbc.ini section tag (e.g. "Sample" -> [Sample])
-                            dsn = (env_config.get('server') or 'Sample').strip()
-                            odbc = {}
-                            for path in odbc_candidates:
-                                odbc = _read_odbc_ini_section(path, dsn)
-                                if odbc:
-                                    break
-                            for key, value in (odbc or {}).items():
-                                if value is not None:
-                                    self.db_config['sybase'][key] = value
-                            sb = self.db_config['sybase']
-                            if not odbc or sb.get('host') is None or sb.get('port') is None or not sb.get('database'):
-                                logger.warning(
-                                    "Sybase host/port/database missing: ensure odbc.ini exists at configs/sybase_config/odbc.ini "
-                                    "with a section matching datasource 'server' (e.g. [Sample]) and Server, Port, Database keys"
-                                )
+
+                # --- Sybase: database.sybase.<dsn_name>.<env> ---
+                sybase_dsns = ds_data.get("database", {}).get("sybase", {})
+                for dsn_name, envs in sybase_dsns.items():
+                    env_config = self._pick_env_config(envs)
+                    if env_config is None:
+                        continue
+                    self.db_config['sybase'] = {
+                        'user': env_config.get('user'),
+                        'password': env_config.get('password'),
+                        'isql_path': env_config.get('isql_path') or 'isql',
+                    }
+                    odbc = {}
+                    for path in odbc_candidates:
+                        odbc = _read_odbc_ini_section(path, dsn_name)
+                        if odbc:
                             break
+                    for key, value in (odbc or {}).items():
+                        if value is not None:
+                            self.db_config['sybase'][key] = value
+                    sb = self.db_config['sybase']
+                    if not odbc or sb.get('host') is None or sb.get('port') is None or not sb.get('database'):
+                        logger.warning(
+                            "Sybase host/port/database missing: ensure odbc.ini exists at configs/sybase_config/odbc.ini "
+                            "with a section matching datasource DSN name (e.g. [%s]) and Server, Port, Database keys",
+                            dsn_name,
+                        )
+                    break
+
+                # --- MySQL: mysql.<dsn_name>.<env> ---
+                mysql_dsns = ds_data.get("mysql", {})
+                for dsn_name, envs in mysql_dsns.items():
+                    env_config = self._pick_env_config(envs)
+                    if env_config is None:
+                        continue
+                    self.db_config['mysql'] = {
+                        'user': env_config.get('user'),
+                        'password': env_config.get('password'),
+                    }
+                    if env_config.get('server'):
+                        self.db_config['mysql']['host'] = env_config['server']
+                    if env_config.get('port') is not None:
+                        self.db_config['mysql']['port'] = env_config['port']
+                    if env_config.get('database'):
+                        self.db_config['mysql']['database'] = env_config['database']
+                    break
             else:
-                logger.warning(f"Datasource config file not found at {datasource_path}, using config.json defaults")
-                    
+                logger.warning(f"Datasource config file not found at {datasource_path}")
+
             email_config_path = self.BASE_DIR.parent / "configs" / "python_config" / "email_config.json"
             if email_config_path.exists():
                 with open(email_config_path, 'r') as f:

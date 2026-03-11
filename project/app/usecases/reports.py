@@ -5,7 +5,6 @@ from typing import Dict, Any, Optional
 from app.services.db_service import DatabaseService
 from app.services.email_service import EmailService
 from app.reports.file_confirmation.engine import FileConfirmationEngine
-from app.reports.config_loader import report_config_loader
 from app.schemas.report_models import ReportGenerationResponse, FileConfirmationInput
 
 logger = logging.getLogger(__name__)
@@ -71,8 +70,8 @@ async def generate_file_confirmation_report(
     logger.info(f"Initiating file confirmation report for {target_date.date()} (cpty={cmd.cpty}, by={cmd.by}, env={cmd.env})")
 
     try:
-        # Load configuration and override with cmd fields
-        config = report_config_loader.load_report_config("file_confirmation")
+        # File confirmation uses inline defaults; no external config file.
+        config = {"formats": ["csv"], "formatting": {}}
         overrides = {"cpty": cmd.cpty, "env": cmd.env}
 
         # Initialize engine and generate with overrides

@@ -23,7 +23,7 @@ class ISQLDatabase(BaseDatabase):
         self.user = config.get("user")
         self.password = config.get("password")
         self.database = config.get("database")
-        self.isql_path = config.get("isql_path", "isql")
+        self.isql_path = config.get("isql_path") or "isql"
 
     def connect(self) -> bool:
         """Test the connection by running a simple query. Returns False if config is incomplete."""

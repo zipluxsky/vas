@@ -29,6 +29,8 @@ class SqlTemplateService:
         extensions = ['.template', '.sql', '']
         
         for base_dir in self.template_dirs:
+            if base_dir is None:
+                continue
             for ext in extensions:
                 # Resolve the path to allow subdirectories like "file_confirmation/ExcelExtract"
                 path = base_dir / f"{template_name}{ext}"
