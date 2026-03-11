@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
+import os
+
 from fastapi import APIRouter, Request, Depends, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 
 from app.core.cli import expose_cli
@@ -9,10 +12,18 @@ from app.schemas.report_models import FileConfirmationInput
 from app.usecases.reports import run_file_confirmation
 from app.usecases.front_office_tasks import upload_document
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     tags=["front_office"],
     responses={404: {"description": "Not found"}},
 )
+
+_MEDIA_TYPES = {
+    ".csv": "text/csv",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+}
 
 
 def get_file_confirmation_input(
@@ -35,16 +46,38 @@ def get_file_confirmation_input(
 
 @router.get(
     "/file_confirmation",
-    response_class=HTMLResponse,
     summary="File Confirmation report",
+    responses={
+        200: {
+            "description": "Report HTML (by=email) or downloadable file (by=download)",
+            "content": {
+                "text/html": {},
+                "text/csv": {},
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+            },
+        }
+    },
 )
 async def file_confirmation_endpoint(
     request: Request,
     cmd: FileConfirmationInput = Depends(get_file_confirmation_input),
 ):
     host = request.client.host if request.client else "0.0.0.0"
-    out = await run_file_confirmation(cmd, host)
-    return HTMLResponse(content=out, status_code=200)
+    result = await run_file_confirmation(cmd, host)
+
+    if cmd.by == "download" and result.get("output_paths"):
+        file_path = result["output_paths"][0]
+        if os.path.isfile(file_path):
+            ext = os.path.splitext(file_path)[1].lower()
+            media_type = _MEDIA_TYPES.get(ext, "application/octet-stream")
+            return FileResponse(
+                path=file_path,
+                filename=os.path.basename(file_path),
+                media_type=media_type,
+            )
+        logger.warning("Download requested but file not found: %s", file_path)
+
+    return HTMLResponse(content=result.get("html", ""), status_code=200)
 
 
 class TriggerUploadDocumentBody(BaseModel):
@@ -74,11 +107,16 @@ async def trigger_upload_document(body: TriggerUploadDocumentBody | None = None)
     return {"ok": True, "task_id": result.id}
 
 
-# AUTO CLI — best practice: use --json for nested or long args; here it's flat so flags work well
+async def _cli_runner(body: FileConfirmationInput) -> str:
+    result = await run_file_confirmation(body, host="cli")
+    if body.by == "download" and result.get("output_paths"):
+        return f"File saved to: {result['output_paths'][0]}"
+    return result.get("html", "")
+
 expose_cli(
     name="file-confirmation",
     model=FileConfirmationInput,
-    runner=lambda body: run_file_confirmation(body, host="cli"),
+    runner=_cli_runner,
     group="reports",
     help="Generate File Confirmation report (same as GET .../front-office/file_confirmation).",
 )

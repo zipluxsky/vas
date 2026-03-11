@@ -25,10 +25,10 @@ async def run_file_confirmation(
     host: str = "0.0.0.0",
     db_service: Optional[DatabaseService] = None,
     email_service: Optional[EmailService] = None,
-) -> str:
+) -> Dict[str, Any]:
     """
-    Run file confirmation report and return HTML result.
-    Used by GET /front_office/file_confirmation and CLI file-confirmation.
+    Run file confirmation report.
+    Returns {"html": str, "output_paths": list[str], "success": bool}.
     """
     if db_service is None or email_service is None:
         from app.api.deps import get_db_service, get_email_service
@@ -54,7 +54,11 @@ async def run_file_confirmation(
             html_parts.append(f"<li>{p}</li>")
         html_parts.append("</ul>")
     html_parts.append("</body></html>")
-    return "".join(html_parts)
+    return {
+        "html": "".join(html_parts),
+        "output_paths": result.output_paths,
+        "success": result.success,
+    }
 
 
 async def generate_file_confirmation_report(
@@ -72,7 +76,7 @@ async def generate_file_confirmation_report(
     try:
         # File confirmation uses inline defaults; no external config file.
         config = {"formats": ["csv"], "formatting": {}}
-        overrides = {"cpty": cmd.cpty, "env": cmd.env}
+        overrides = cmd.model_dump()
 
         # Initialize engine and generate with overrides
         engine = FileConfirmationEngine(db_service, config)
@@ -90,7 +94,8 @@ async def generate_file_confirmation_report(
             email_sent = email_service.send_report(
                 "File Confirmation",
                 output_paths,
-                target_date
+                target_date,
+                env=cmd.env,
             )
             if not email_sent:
                 logger.warning("Report generated but email sending failed")

@@ -58,12 +58,13 @@ class FileConfirmationEngine:
             }
 
     def _fetch_sybase_data(self, target_date: datetime) -> List[Dict[str, Any]]:
-        """Fetch related business data from Sybase. Uses _run_overrides (e.g. cpty from cmd) when set."""
+        """Fetch related business data from Sybase. All _run_overrides are passed as SQL template params."""
         from app.services.sql_template_service import sql_templates
         
         try:
-            cpty_value = self._run_overrides.get("cpty") or self.config.get("cpty", "'DEFAULT_CPTY'")
-            query = sql_templates.get_query("file_confirmation/ExcelExtract", params={"cpty": cpty_value})
+            params = dict(self._run_overrides)
+            params.setdefault("trade_date", target_date.strftime("%Y%m%d"))
+            query = sql_templates.get_query("file_confirmation/ExcelExtract", params=params)
             
             return self.db_service.sybase.execute_query(query)
         except Exception as e:
