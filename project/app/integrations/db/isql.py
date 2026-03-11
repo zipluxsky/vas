@@ -90,6 +90,49 @@ class ISQLDatabase(BaseDatabase):
             if os.path.exists(sql_file):
                 os.remove(sql_file)
 
+    def _run_isql_to_file(self, query: str) -> str:
+        """Execute query using ``isql -o <outfile>`` and return the file content.
+
+        The ``-o`` flag produces a slightly different column layout compared to
+        stdout capture: every row has a leading and trailing empty field caused
+        by the column separator.  The legacy file_confirmation parser relies on
+        this format (``row.split(",")[1:-1]``).
+        """
+        sql_file = self._create_temp_sql_file(query)
+        fd_out, out_file = tempfile.mkstemp(suffix=".csv")
+        os.close(fd_out)
+
+        try:
+            cmd = [
+                self.isql_path,
+                "-U", self.user or "",
+                "-P", self.password or "",
+                "-S", f"{self.host}:{self.port}" if self.port else (self.host or ""),
+                "-i", sql_file,
+                "-o", out_file,
+                "-s", ",",
+                "-w", "2000",
+            ]
+
+            logger.debug("Executing ISQL (file output) for query: %s...", query[:50])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+            if result.returncode != 0:
+                logger.error("ISQL error: %s", result.stderr)
+                raise Exception(f"ISQL execution failed: {result.stderr}")
+
+            if not os.path.isfile(out_file):
+                raise Exception("ISQL produced no output file")
+
+            with open(out_file, "rt") as f:
+                return f.read()
+        finally:
+            if os.path.exists(sql_file):
+                os.remove(sql_file)
+            if os.path.exists(out_file):
+                os.remove(out_file)
+
     def _format_query(self, query: str, params: tuple = None) -> str:
         """
         Safely formats a SQL query by replacing ? placeholders with escaped parameters.
@@ -119,14 +162,20 @@ class ISQLDatabase(BaseDatabase):
         return formatted_query
 
     def execute_raw_query(self, query: str, params: tuple = None) -> str:
-        """Execute query and return the raw isql text output (no parsing)."""
+        """Execute query via ``isql -o <file>`` and return the file contents.
+
+        This mirrors the legacy behaviour where isql writes to a file (``-o``).
+        The output format differs from stdout capture: each line has leading and
+        trailing delimiter-generated empty fields, which the legacy parser
+        expects (``row.split(",")[1:-1]``).
+        """
         if not self.host or self.port is None or not self.user or not self.database:
             raise Exception(
                 f"Sybase config incomplete (host={self.host}, port={self.port}, "
                 f"user={'set' if self.user else None}, database={self.database})"
             )
         formatted_query = self._format_query(query, params)
-        return self._run_isql(formatted_query)
+        return self._run_isql_to_file(formatted_query)
 
     def execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """
