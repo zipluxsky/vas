@@ -180,7 +180,7 @@ class FileConfirmationEngine:
                     "ver": cmd.versioning,
                 },
             )
-            log_manager.fastapi_log(query, show_in_web=0)
+            log_manager.fastapi_log(query, show_in_web=1)
 
             raw_output = self.db_service.sybase.execute_raw_query(query)
             log_manager.fastapi_log("Completed SQL.")
