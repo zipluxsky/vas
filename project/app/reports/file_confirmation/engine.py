@@ -203,21 +203,27 @@ class FileConfirmationEngine:
             and not l.strip().lower().endswith("rows affected)")
         ]
 
-        # Find the separator row (all dashes/commas/spaces) — everything
-        # before it is noise (e.g. "Database changed" from USE), the line
-        # before the separator is the header.
+        logger.debug("isql output: %d non-empty lines, first 5: %s",
+                      len(lines_raw), [l[:120] for l in lines_raw[:5]])
+
+        # Detect the separator row: after removing commas and whitespace, the
+        # remaining characters should all be dashes (e.g. " ,----,----,").
         sep_idx = None
         for idx, l in enumerate(lines_raw):
-            if all(c in "-," or c.isspace() for c in l) and "," in l:
+            stripped = l.replace(",", "").replace(" ", "").replace("\t", "")
+            if stripped and all(c == "-" for c in stripped):
                 sep_idx = idx
                 break
 
-        if sep_idx is None or sep_idx < 1:
-            log_manager.fastapi_log("Error - Cannot locate header/separator in SQL result")
-            return self._result_from_log(log_manager)
-
-        # Keep header (line before separator) + data (lines after separator)
-        lines_raw = [lines_raw[sep_idx - 1]] + lines_raw[sep_idx + 1:]
+        if sep_idx is not None and sep_idx >= 1:
+            # Header is the line right before the separator; data starts after.
+            lines_raw = [lines_raw[sep_idx - 1]] + lines_raw[sep_idx + 1:]
+        else:
+            # No separator found — fall back to legacy behaviour where
+            # lines_raw[0]=header, lines_raw[1]=separator (maybe), rest=data.
+            logger.warning("No isql separator detected; falling back to positional parsing")
+            if len(lines_raw) > 1:
+                del lines_raw[1]
 
         if len(lines_raw) < 2:
             log_manager.fastapi_log("Error - No data rows in SQL result")
@@ -230,7 +236,7 @@ class FileConfirmationEngine:
 
         # Determine expected column count from header and drop short rows
         expected_cols = len(lines[0])
-        lines = [i for i in lines if len(i) == expected_cols]
+        lines = [lines[0]] + [i for i in lines[1:] if len(i) == expected_cols]
 
         if len(lines) < 1:
             log_manager.fastapi_log("Error - No valid rows after parsing")
@@ -245,7 +251,9 @@ class FileConfirmationEngine:
             with open(exclfile, "rt") as f:
                 for i in f:
                     allocid = i.split(",")
-        lines = [i for i in lines if len(i) > allocColIdx and i[allocColIdx] not in allocid]
+        lines = [lines[0]] + [
+            i for i in lines[1:] if len(i) > allocColIdx and i[allocColIdx] not in allocid
+        ]
         log_manager.fastapi_log("Excl. Alloc: " + str(len(allocid)))
 
         # --- (i) Per-counterparty formatting ---
