@@ -6,6 +6,7 @@ services:
     container_name: vascular-redis
     networks:
       - vascular_internal
+      - airflow_shared_net
     restart: unless-stopped
 
   vascular-api:
