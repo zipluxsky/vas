@@ -21,4 +21,14 @@ celery_app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
+    task_track_started=True,
+    result_expires=86400,
+    result_backend_transport_options={
+        'retry_policy': {
+            'max_retries': 3,
+            'interval_start': 0.2,
+            'interval_step': 0.5,
+            'interval_max': 3,
+        },
+    },
 )
