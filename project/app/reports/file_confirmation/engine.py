@@ -170,15 +170,20 @@ class FileConfirmationEngine:
 
         # --- (f) SQL execution via db_service ---
         try:
+            # Start with all raw input fields so any {param} in the template
+            # can be replaced (e.g. {trade_date}, {env}, {versioning}, …).
+            sql_params = {k: str(v) for k, v in cmd.model_dump().items()}
+            # Override / add computed values used by the legacy template.
+            sql_params.update({
+                "date": sDate_str,
+                "startdate": sDateStart,
+                "cpty": strCpty,
+                "region": strRegion,
+                "ver": cmd.versioning,
+            })
             query = sql_templates.get_query(
                 "file_confirmation/ExcelExtract",
-                params={
-                    "date": sDate_str,
-                    "startdate": sDateStart,
-                    "cpty": strCpty,
-                    "region": strRegion,
-                    "ver": cmd.versioning,
-                },
+                params=sql_params,
             )
             log_manager.fastapi_log(query, show_in_web=1)
 
