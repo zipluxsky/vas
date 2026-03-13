@@ -4,6 +4,8 @@ services:
   vascular-redis:
     image: redis:7-alpine
     container_name: vascular-redis
+    environment:
+      - TZ=Asia/Hong_Kong
     networks:
       - vascular_internal
       - airflow_shared_net
@@ -21,6 +23,7 @@ services:
       - vascular-configs:/app/configs
       - vascular-data:/app/data
     environment:
+      - TZ=Asia/Hong_Kong
       - CELERY_BROKER_URL=redis://vascular-redis:6379/0
       - CELERY_RESULT_BACKEND=redis://vascular-redis:6379/0
       - ATTACHMENT_ALLOWED_DIR=/app/data
@@ -40,6 +43,7 @@ services:
       - vascular-configs:/app/configs
       - vascular-data:/app/data
     environment:
+      - TZ=Asia/Hong_Kong
       - CELERY_BROKER_URL=redis://vascular-redis:6379/0
       - CELERY_RESULT_BACKEND=redis://vascular-redis:6379/0
       - ATTACHMENT_ALLOWED_DIR=/app/data
