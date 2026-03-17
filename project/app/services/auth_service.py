@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import bcrypt
 from jose import jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
@@ -20,8 +20,6 @@ ROLE_PERMISSIONS: Dict[str, List[str]] = {
     "user": ["reports", "settings"],
     "viewer": ["reports"],
 }
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def _users_config_path() -> Path:
@@ -49,9 +47,14 @@ def load_users() -> List[Dict[str, Any]]:
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    """Verify plain password against stored bcrypt hash."""
+    """Verify plain password against stored bcrypt hash (using bcrypt lib for compatibility)."""
+    if not password_hash or not plain_password:
+        return False
     try:
-        return pwd_context.verify(plain_password, password_hash)
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            password_hash.encode("utf-8"),
+        )
     except Exception as e:
         logger.debug("Password verify error: %s", e)
         return False

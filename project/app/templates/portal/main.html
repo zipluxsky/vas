@@ -6,69 +6,157 @@
   <title>Vascular Portal – Main</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: #1e293b;
+      background: #f1f5f9;
+    }
     .layout { display: flex; min-height: 100vh; }
     .sidebar {
-      width: 220px;
-      background: #1e293b;
+      width: 240px;
+      background: linear-gradient(180deg, #0f1729 0%, #1e3a5f 100%);
       color: #e2e8f0;
-      padding: 1rem 0;
+      padding: 0;
+      flex-shrink: 0;
     }
-    .sidebar h2 {
-      margin: 0 1rem 1rem;
-      font-size: 1rem;
+    .sidebar-brand {
+      padding: 1.25rem 1.25rem 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .sidebar-brand-name {
+      font-size: 0.9375rem;
       font-weight: 600;
+      letter-spacing: 0.02em;
+      color: #fff;
+    }
+    .sidebar-brand-tag {
+      font-size: 0.6875rem;
       color: #94a3b8;
+      margin-top: 0.25rem;
+      letter-spacing: 0.03em;
+    }
+    .sidebar-nav-caption {
+      padding: 1rem 1.25rem 0.5rem;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      text-transform: uppercase;
     }
     .sidebar nav a {
       display: block;
-      padding: 0.6rem 1rem;
-      color: #e2e8f0;
+      padding: 0.625rem 1.25rem;
+      color: #cbd5e1;
       text-decoration: none;
+      font-size: 0.875rem;
+      border-left: 3px solid transparent;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
     }
-    .sidebar nav a:hover { background: #334155; }
+    .sidebar nav a:hover {
+      background: rgba(255,255,255,0.06);
+      color: #f1f5f9;
+    }
+    .sidebar nav a.active {
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      border-left-color: #d4a84b;
+    }
     .main {
       flex: 1;
-      padding: 1.5rem;
-      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
     }
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 1.5rem;
+      padding: 1rem 1.5rem;
+      background: #ffffff;
+      border-bottom: 1px solid #e2e8f0;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
     }
-    .header span { font-weight: 500; color: #334155; }
-    .header a {
+    .header-title {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: #0f1729;
+      letter-spacing: -0.01em;
+    }
+    .header-user {
+      font-size: 0.8125rem;
       color: #64748b;
+      margin-right: 0.75rem;
+    }
+    .header a {
+      font-size: 0.8125rem;
+      color: #1e3a5f;
       text-decoration: none;
-      font-size: 0.875rem;
+      font-weight: 500;
     }
-    .header a:hover { color: #0f172a; }
-    .content-area {
-      background: #fff;
-      border-radius: 8px;
+    .header a:hover { text-decoration: underline; }
+    .content-wrap {
+      flex: 1;
       padding: 1.5rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      overflow: auto;
     }
-    .content-area h3 { margin: 0 0 0.5rem; color: #1e293b; }
-    .content-area p { margin: 0; color: #64748b; }
+    .content-area {
+      background: #ffffff;
+      border-radius: 4px;
+      padding: 1.5rem 1.75rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      border: 1px solid #e2e8f0;
+      max-width: 960px;
+    }
+    .content-area h3 {
+      margin: 0 0 0.5rem;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: #0f1729;
+      letter-spacing: -0.01em;
+    }
+    .content-area p {
+      margin: 0;
+      font-size: 0.875rem;
+      color: #64748b;
+      line-height: 1.5;
+    }
+    .content-divider {
+      height: 1px;
+      background: #e2e8f0;
+      margin: 1.25rem 0;
+    }
+    .content-note {
+      font-size: 0.8125rem;
+      color: #94a3b8;
+    }
   </style>
 </head>
 <body>
   <div class="layout">
     <aside class="sidebar">
-      <h2>Menu</h2>
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-name">Vascular Portal</div>
+        <div class="sidebar-brand-tag">Document Management &amp; Processing</div>
+      </div>
+      <div class="sidebar-nav-caption">Navigation</div>
       <nav id="menu"></nav>
     </aside>
     <main class="main">
       <div class="header">
-        <span id="welcome">Vascular Portal</span>
-        <a href="#" id="logout">Sign out</a>
+        <span class="header-title" id="welcome">Vascular Portal</span>
+        <div style="display:flex;align-items:center;">
+          <span class="header-user" id="userLabel"></span>
+          <a href="#" id="logout">Sign out</a>
+        </div>
       </div>
-      <div class="content-area">
-        <h3>Welcome</h3>
-        <p>Select an item from the side menu. Reports, Settings, and Admin are shown based on your permissions.</p>
+      <div class="content-wrap">
+        <div class="content-area">
+          <h3>Welcome</h3>
+          <p>Select an item from the side menu. Reports, Settings, and Admin are shown based on your permissions.</p>
+          <div class="content-divider"></div>
+          <p class="content-note">Authorised use only. All activity may be logged for compliance and security.</p>
+        </div>
       </div>
     </main>
   </div>
@@ -110,7 +198,9 @@
         .then(function (data) {
           if (!data) return;
           var el = document.getElementById('welcome');
-          if (el) el.textContent = 'Vascular Portal – ' + (data.username || 'User');
+          if (el) el.textContent = 'Vascular Portal';
+          var userEl = document.getElementById('userLabel');
+          if (userEl) userEl.textContent = data.username || '';
           renderMenu(data.permissions || []);
         })
         .catch(function () {

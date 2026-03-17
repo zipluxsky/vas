@@ -14,6 +14,7 @@ aiofiles
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt
 click
 pytest
 pytest-mock
