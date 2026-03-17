@@ -13,6 +13,7 @@ pyyaml
 aiofiles
 python-multipart
 python-jose[cryptography]
+passlib[bcrypt]
 click
 pytest
 pytest-mock

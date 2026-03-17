@@ -1,14 +1,19 @@
 import uvicorn
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.templating import Jinja2Templates
 
-from app.api.routers import front_office, communicators
+from app.api.routers import auth, front_office, communicators
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.core.swagger.page import custom_openapi, get_openapi_schema_filtered_by_tags
+
+_templates_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(_templates_dir))
 
 setup_logging()
 
@@ -50,8 +55,23 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # Include routers
+app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(front_office.router, prefix=f"{settings.API_V1_STR}/front-office", tags=["front-office"])
 app.include_router(communicators.router, prefix=f"{settings.API_V1_STR}/communicators", tags=["communicators"])
+
+# --- Portal (Login + Main with side menu) ---
+
+@app.get("/", include_in_schema=False)
+async def portal_login(request: Request):
+    """Portal entry: login page. Front-end redirects to /main if already logged in."""
+    return templates.TemplateResponse("portal/login.html", {"request": request})
+
+
+@app.get("/main", include_in_schema=False)
+async def portal_main(request: Request):
+    """Main page with side menu. Menu items are rendered by front-end from /api/v1/me."""
+    return templates.TemplateResponse("portal/main.html", {"request": request})
+
 
 @app.get("/health", tags=["health"])
 async def health_check():

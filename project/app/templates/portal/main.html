@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vascular Portal – Main</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: 220px;
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1rem 0;
+    }
+    .sidebar h2 {
+      margin: 0 1rem 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+    .sidebar nav a {
+      display: block;
+      padding: 0.6rem 1rem;
+      color: #e2e8f0;
+      text-decoration: none;
+    }
+    .sidebar nav a:hover { background: #334155; }
+    .main {
+      flex: 1;
+      padding: 1.5rem;
+      background: #f8fafc;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+    .header span { font-weight: 500; color: #334155; }
+    .header a {
+      color: #64748b;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+    .header a:hover { color: #0f172a; }
+    .content-area {
+      background: #fff;
+      border-radius: 8px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .content-area h3 { margin: 0 0 0.5rem; color: #1e293b; }
+    .content-area p { margin: 0; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>Menu</h2>
+      <nav id="menu"></nav>
+    </aside>
+    <main class="main">
+      <div class="header">
+        <span id="welcome">Vascular Portal</span>
+        <a href="#" id="logout">Sign out</a>
+      </div>
+      <div class="content-area">
+        <h3>Welcome</h3>
+        <p>Select an item from the side menu. Reports, Settings, and Admin are shown based on your permissions.</p>
+      </div>
+    </main>
+  </div>
+  <script>
+    (function () {
+      var API_BASE = '/api/v1';
+      var token = sessionStorage.getItem('portal_token');
+      if (!token) {
+        window.location.href = '/';
+        return;
+      }
+
+      var menuLabels = { reports: 'Reports', settings: 'Settings', admin: 'Admin' };
+
+      function renderMenu(permissions) {
+        var nav = document.getElementById('menu');
+        nav.innerHTML = '';
+        (permissions || []).forEach(function (key) {
+          var a = document.createElement('a');
+          a.href = '#';
+          a.textContent = menuLabels[key] || key;
+          a.setAttribute('data-section', key);
+          nav.appendChild(a);
+        });
+      }
+
+      fetch(API_BASE + '/me', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      })
+        .then(function (r) {
+          if (r.status === 401) {
+            sessionStorage.removeItem('portal_token');
+            window.location.href = '/';
+            return;
+          }
+          if (!r.ok) throw new Error('Failed to load user');
+          return r.json();
+        })
+        .then(function (data) {
+          if (!data) return;
+          var el = document.getElementById('welcome');
+          if (el) el.textContent = 'Vascular Portal – ' + (data.username || 'User');
+          renderMenu(data.permissions || []);
+        })
+        .catch(function () {
+          sessionStorage.removeItem('portal_token');
+          window.location.href = '/';
+        });
+
+      document.getElementById('logout').addEventListener('click', function (e) {
+        e.preventDefault();
+        sessionStorage.removeItem('portal_token');
+        window.location.href = '/';
+      });
+    })();
+  </script>
+</body>
+</html>
