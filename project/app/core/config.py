@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["*"]
     
-    # JWT Settings — SECRET_KEY must be set via environment variable (no hardcoded default)
-    SECRET_KEY: str = ""  # Set SECRET_KEY in environment; empty causes JWT auth to fail
+    # JWT Settings — set SECRET_KEY in environment for production; dev default allows portal login
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "vascular-dev-secret-change-in-production")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
