@@ -6,3 +6,6 @@
 2026-03-09 16:46:54,445 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/communicators/1 "HTTP/1.1 200 OK"
 2026-03-09 16:46:54,460 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/communicators/99 "HTTP/1.1 404 Not Found"
 2026-03-09 16:46:54,477 - httpx - INFO - HTTP Request: POST http://testserver/api/v1/communicators/process "HTTP/1.1 200 OK"
+2026-03-30 15:37:59,553 - app.core.logging - INFO - Logging initialized at level INFO
+2026-03-30 15:38:33,558 - app.core.logging - INFO - Logging initialized at level INFO
+2026-03-30 15:38:48,475 - app.core.logging - INFO - Logging initialized at level INFO

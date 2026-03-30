@@ -33,6 +33,11 @@ _CONFIG_DIR = settings.BASE_DIR.parent / "configs" / "python_config" / "file_con
 _RUNPATH = str(settings.BASE_DIR.parent / "data" / "sql" / "file_confirmation")
 _BASE_DIR = str(settings.BASE_DIR.parent)
 
+# Runtime-generated SQL under runpath must not use the same basename as the
+# template ``file_confirmation/ExcelExtract`` (often ``ExcelExtract.sql`` in
+# data/sql/file_confirmation/), or cleanup would delete the template.
+FC_RUNTIME_SQL_BASENAME = "ExcelExtract_generated.sql"
+
 
 class FileConfirmationEngine:
     """Engine that reproduces the full legacy file_confirmation() logic.
@@ -361,7 +366,7 @@ class FileConfirmationEngine:
         )
 
         isqlout = os.path.join(runpath, "ExcelExtract_" + sDate_str + ".csv")
-        isqlfile = os.path.join(runpath, "ExcelExtract.sql")
+        isqlfile = os.path.join(runpath, FC_RUNTIME_SQL_BASENAME)
         if os.path.isfile(isqlfile):
             os.remove(isqlfile)
         if os.path.isfile(isqlout):
@@ -661,7 +666,7 @@ class FileConfirmationEngine:
         )
 
         # --- Cleanup temp files ---
-        isqlfile = os.path.join(runpath, "ExcelExtract.sql")
+        isqlfile = os.path.join(runpath, FC_RUNTIME_SQL_BASENAME)
         if os.path.isfile(isqlfile):
             os.remove(isqlfile)
         if os.path.isfile(isqlout):
