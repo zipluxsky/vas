@@ -8,6 +8,7 @@ data is stored in Redis via PipelineContext.
 """
 import asyncio
 import logging
+import os
 from typing import Any
 
 from app.api.deps import get_db_service, get_email_service
@@ -145,6 +146,22 @@ def fc_prepare_config(
     except Exception as exc:
         raise self.retry(exc=exc)
 
+    sp = result.get("sql_params") or {}
+    excl = result.get("exclfile") or ""
+    excl_ok = bool(excl) and os.path.isfile(excl)
+    logger.info(
+        "fc_prepare_config diag trade_date=%s cpty=%s sql_date=%s exclflg=%s "
+        "exclfile=%s excl_exists=%s excl_size=%s region_preview=%r",
+        cmd_dict.get("trade_date"),
+        cmd_dict.get("cpty"),
+        sp.get("date"),
+        result.get("exclflg"),
+        excl,
+        excl_ok,
+        os.path.getsize(excl) if excl_ok else 0,
+        (sp.get("region") or "")[:120],
+    )
+
     ctx = PipelineContext(pipeline_key)
     ctx.write("prepare_config", result)
     _log_step("fc_prepare_config", pipeline_key, _trace, "completed")
@@ -235,6 +252,10 @@ def fc_parse_data(
                 "has_records": False,
             }
             ctx.write("parse_data", empty)
+            logger.info(
+                "fc_parse_data diag has_records=False data_rows=0 pipeline_key=%s (ValueError path)",
+                pipeline_key,
+            )
             _log_step("fc_parse_data", pipeline_key, _trace, "completed (no rows)")
             return {
                 "pipeline_key": pipeline_key,
@@ -247,6 +268,14 @@ def fc_parse_data(
         raise self.retry(exc=exc)
 
     ctx.write("parse_data", result)
+    lines = result.get("lines") or []
+    n_data = max(0, len(lines) - 1) if lines else 0
+    logger.info(
+        "fc_parse_data diag has_records=%s data_rows=%s pipeline_key=%s",
+        result.get("has_records"),
+        n_data,
+        pipeline_key,
+    )
     _log_step("fc_parse_data", pipeline_key, _trace, "completed")
     has_records = bool(result.get("has_records", True))
     return {
