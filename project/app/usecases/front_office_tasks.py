@@ -16,6 +16,9 @@ from app.core.pipeline_context import PipelineContext
 
 logger = logging.getLogger(__name__)
 
+# Same text as ``ValueError`` from file confirmation parse when SQL has no data rows.
+FC_NO_DATA_ROWS_SQL_MSG = "No data rows in SQL result"
+
 
 def _log_step(step: str, pipeline_key: str, trace: dict | None, msg: str = "started") -> None:
     t = trace or {}
@@ -223,12 +226,35 @@ def fc_parse_data(
     )
     try:
         result = engine.parse_data(query_ctx, config_ctx)
+    except ValueError as exc:
+        if FC_NO_DATA_ROWS_SQL_MSG in str(exc):
+            empty = {
+                "lines": [],
+                "cptyColIdx": 0,
+                "allocColIdx": 0,
+                "has_records": False,
+            }
+            ctx.write("parse_data", empty)
+            _log_step("fc_parse_data", pipeline_key, _trace, "completed (no rows)")
+            return {
+                "pipeline_key": pipeline_key,
+                "step": "parse_data",
+                "status": "success",
+                "has_records": False,
+            }
+        raise self.retry(exc=exc)
     except Exception as exc:
         raise self.retry(exc=exc)
 
     ctx.write("parse_data", result)
     _log_step("fc_parse_data", pipeline_key, _trace, "completed")
-    return {"pipeline_key": pipeline_key, "step": "parse_data", "status": "success"}
+    has_records = bool(result.get("has_records", True))
+    return {
+        "pipeline_key": pipeline_key,
+        "step": "parse_data",
+        "status": "success",
+        "has_records": has_records,
+    }
 
 
 @celery_app.task(name="fc_generate_report", bind=True, max_retries=2, default_retry_delay=60)

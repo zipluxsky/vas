@@ -247,7 +247,12 @@ class FileConfirmationEngine:
                 del lines_raw[1]
 
         if len(lines_raw) < 2:
-            raise ValueError("No data rows in SQL result")
+            return {
+                "lines": [],
+                "cptyColIdx": 0,
+                "allocColIdx": 0,
+                "has_records": False,
+            }
 
         lines = [(i.split(","))[1:-1] for i in lines_raw]
         for i in lines:
@@ -268,10 +273,13 @@ class FileConfirmationEngine:
             i for i in lines[1:] if len(i) > allocColIdx and i[allocColIdx] not in allocid
         ]
 
+        has_records = len(lines) > 1
+
         return {
             "lines": lines,
             "cptyColIdx": cptyColIdx,
             "allocColIdx": allocColIdx,
+            "has_records": has_records,
         }
 
     def generate_report(
@@ -283,6 +291,16 @@ class FileConfirmationEngine:
 
         Returns ``{"output_paths": [...], "html_body": "...", "record_count": int, "success": bool}``.
         """
+        if data_ctx.get("has_records") is False:
+            log_manager = LogManager("monitor", "fc_pipeline")
+            return {
+                "success": True,
+                "output_paths": [],
+                "html_body": "",
+                "record_count": 0,
+                "log_html": log_manager.gen_fastapi_log(),
+            }
+
         lines = data_ctx["lines"]
         cptyColIdx = data_ctx["cptyColIdx"]
         allocColIdx = data_ctx["allocColIdx"]
