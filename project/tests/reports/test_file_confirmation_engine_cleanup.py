@@ -35,3 +35,24 @@ def test_cleanup_removes_only_generated_sql_leaves_template(tmp_path):
 
     assert template.is_file()
     assert not generated.is_file()
+
+
+def test_parse_isql_ruler_lines_keeps_first_data_row_when_no_dash_ruler():
+    """Without a dash-only ruler, legacy code deleted ``lines_raw[1]`` (first data row)."""
+    from app.reports.file_confirmation.engine import _parse_isql_ruler_lines
+
+    raw = ",H1,H2,\n,V1,V2,\n"
+    lines = _parse_isql_ruler_lines(raw)
+    assert len(lines) == 2
+    assert "H1" in lines[0]
+    assert "V1" in lines[1]
+
+
+def test_parse_isql_ruler_lines_strips_dash_or_plus_rulers():
+    from app.reports.file_confirmation.engine import _parse_isql_ruler_lines
+
+    dash = ",a,b,\n,-,-,\n,1,2,\n"
+    assert len(_parse_isql_ruler_lines(dash)) == 2
+
+    plus = ",a,b,\n,---+---,\n,1,2,\n"
+    assert len(_parse_isql_ruler_lines(plus)) == 2

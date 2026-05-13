@@ -39,6 +39,49 @@ _BASE_DIR = str(settings.BASE_DIR.parent)
 FC_RUNTIME_SQL_BASENAME = "ExcelExtract_generated.sql"
 
 
+def _is_isql_separator_line(ln: str) -> bool:
+    """True if ``ln`` looks like isql's ruler between header and data (``-o`` output).
+
+    Some builds use only ASCII ``-`` between commas; others use ``+`` / ``=`` at
+    column joins. The legacy parser assumed a dash-only ruler and otherwise
+    deleted ``lines_raw[1]``, which removes the first data row when no ruler
+    matches (false 'No data rows in SQL result').
+    """
+    stripped = ln.replace(",", "").replace(" ", "").replace("\t", "")
+    if not stripped:
+        return False
+    if all(c == "-" for c in stripped):
+        return True
+    if all(c in "-+=" for c in stripped):
+        return True
+    return False
+
+
+def _parse_isql_ruler_lines(raw_output: str) -> List[str]:
+    """Drop blank/status lines and the isql ruler row; return header + data lines."""
+    raw_lines = raw_output.split("\n")
+    lines_raw = [ln for ln in raw_lines if ln.strip()]
+    lines_raw = [
+        ln
+        for ln in lines_raw
+        if not ln.strip().lower().startswith("return status")
+        and not ln.strip().lower().endswith("rows affected)")
+    ]
+
+    sep_idx = None
+    for idx, ln in enumerate(lines_raw):
+        if _is_isql_separator_line(ln):
+            sep_idx = idx
+            break
+
+    if sep_idx is not None and sep_idx >= 1:
+        lines_raw = [lines_raw[sep_idx - 1]] + lines_raw[sep_idx + 1:]
+    elif len(lines_raw) > 1 and _is_isql_separator_line(lines_raw[1]):
+        del lines_raw[1]
+
+    return lines_raw
+
+
 class FileConfirmationEngine:
     """Engine that reproduces the full legacy file_confirmation() logic.
 
@@ -225,26 +268,7 @@ class FileConfirmationEngine:
         allocCol = "CL_TRADE_SET_ID"
         allocColIdx = 33
 
-        raw_lines = raw_output.split("\n")
-        lines_raw = [ln for ln in raw_lines if ln.strip()]
-        lines_raw = [
-            ln for ln in lines_raw
-            if not ln.strip().lower().startswith("return status")
-            and not ln.strip().lower().endswith("rows affected)")
-        ]
-
-        sep_idx = None
-        for idx, ln in enumerate(lines_raw):
-            stripped = ln.replace(",", "").replace(" ", "").replace("\t", "")
-            if stripped and all(c == "-" for c in stripped):
-                sep_idx = idx
-                break
-
-        if sep_idx is not None and sep_idx >= 1:
-            lines_raw = [lines_raw[sep_idx - 1]] + lines_raw[sep_idx + 1:]
-        else:
-            if len(lines_raw) > 1:
-                del lines_raw[1]
+        lines_raw = _parse_isql_ruler_lines(raw_output)
 
         if len(lines_raw) < 2:
             return {
@@ -538,40 +562,20 @@ class FileConfirmationEngine:
             log_manager.fastapi_log("Error - No SQL result")
             return self._result_from_log(log_manager)
 
-        raw_lines = raw_output.split("\n")
-        lines_raw = [l for l in raw_lines if l.strip()]
-        # Remove informational lines produced by isql
-        lines_raw = [
-            l
-            for l in lines_raw
-            if not l.strip().lower().startswith("return status")
-            and not l.strip().lower().endswith("rows affected)")
-        ]
+        lines_raw = _parse_isql_ruler_lines(raw_output)
 
-        logger.debug("isql output: %d non-empty lines, first 5: %s",
-                      len(lines_raw), [l[:120] for l in lines_raw[:5]])
-
-        # Detect the separator row: after removing commas and whitespace, the
-        # remaining characters should all be dashes (e.g. " ,----,----,").
-        sep_idx = None
-        for idx, l in enumerate(lines_raw):
-            stripped = l.replace(",", "").replace(" ", "").replace("\t", "")
-            if stripped and all(c == "-" for c in stripped):
-                sep_idx = idx
-                break
-
-        if sep_idx is not None and sep_idx >= 1:
-            # Header is the line right before the separator; data starts after.
-            lines_raw = [lines_raw[sep_idx - 1]] + lines_raw[sep_idx + 1:]
-        else:
-            # No separator found — fall back to legacy behaviour where
-            # lines_raw[0]=header, lines_raw[1]=separator (maybe), rest=data.
-            logger.warning("No isql separator detected; falling back to positional parsing")
-            if len(lines_raw) > 1:
-                del lines_raw[1]
+        logger.debug(
+            "isql output after ruler strip: %d lines, first 5: %s",
+            len(lines_raw),
+            [l[:120] for l in lines_raw[:5]],
+        )
 
         if len(lines_raw) < 2:
-            log_manager.fastapi_log("Error - No data rows in SQL result")
+            log_manager.fastapi_log(
+                "Error - No data rows in SQL result (lines after ruler strip: %d; "
+                "if the DB returned rows, check isql -o format or SQL filters: date=%s, region snippet logged above)"
+                % (len(lines_raw), sql_params.get("date", ""))
+            )
             return self._result_from_log(log_manager)
 
         # Split by comma, strip leading/trailing empty fields (-o file format)
